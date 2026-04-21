@@ -12,6 +12,7 @@ venv/
 solved-noti/
 
 # Local data / secrets
+data/chroma_db
 data/tracker.db
 data/*.db
 .env

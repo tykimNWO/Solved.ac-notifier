@@ -49,10 +49,11 @@ def build_vector_db():
         # 1. 텍스트 정제
         clean_desc = clean_html(desc)
         clean_inp = clean_html(inp)
+        clean_out = clean_html(out)
         
         # 2. 임베딩할 문서(Document) 조합
         # LLM이 문제의 핵심 의미를 잘 파악하도록 압축합니다.
-        document_text = f"[문제: {title}]\n{clean_desc}\n[입력조건]: {clean_inp}"
+        document_text = f"[문제: {title}]\n{clean_desc}\n[입력조건]: {clean_inp}\n[입력조건]: {clean_out}"
         
         # 3. 메타데이터(Metadata) 구성
         meta = {
@@ -63,7 +64,7 @@ def build_vector_db():
         }
         
         ids.append(str(p_id))
-        documents.append(document_text)
+        documents.append(document_text[:8000])
         metadatas.append(meta)
         
         # 메모리 관리를 위해 100개씩 끊어서 업로드 (Chunking)
@@ -75,14 +76,16 @@ def build_vector_db():
     if ids:
         _embed_and_store(ids, documents, metadatas)
         
-    print("🎉 Vector DB 구축이 완료되었습니다!")
+        print("🎉 Vector DB 구축이 완료되었습니다!")
+    else:
+        conn.close()
 
 def _embed_and_store(ids, documents, metadatas):
     """Google 임베딩 API 호출 및 ChromaDB 저장"""
     try:
         # Google API로 텍스트들을 768차원 벡터로 변환
         response = client.models.embed_content(
-            model='text-embedding-004',
+            model='gemini-embedding-001',
             contents=documents
         )
         # 반환된 벡터 리스트 추출

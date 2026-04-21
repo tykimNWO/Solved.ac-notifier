@@ -32,6 +32,20 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # 2-1. 문제 상세 정보 (HTML 본문 등)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS problem_details (
+                    problem_id INTEGER PRIMARY KEY,
+                    description TEXT,
+                    input_desc TEXT,
+                    output_desc TEXT,
+                    sample_inputs TEXT,
+                    sample_outputs TEXT,
+                    problem_limit TEXT,
+                    is_scraped INTEGER DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             # 3. 사용자 태그별 통계
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_tag_stats (
@@ -96,3 +110,23 @@ class DatabaseManager:
                     status=excluded.status,
                     logged_at=CURRENT_TIMESTAMP
             """, (problem_id, status))
+
+    def get_solved_problem_ids(self):
+        """이미 푼 문제 ID 목록을 반환합니다."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT problem_id FROM user_solve_log WHERE status='solved'")
+            return [row[0] for row in cursor.fetchall()]
+
+    def get_latest_user_stats(self):
+        """가장 최근의 사용자 스탯을 반환합니다."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT tier, rating, solved_count, streak FROM user_stats ORDER BY date DESC LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "tier": row[0],
+                    "rating": row[1],
+                    "solved_count": row[2],
+                    "streak": row[3]
+                }
+            return None
