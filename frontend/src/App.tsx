@@ -49,7 +49,7 @@ function App() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let done = false;
-      setIsLoading(false);
+      setIsLoading(true);
       while (!done) {
         const { value, done: readerDone } = await reader.read();
         done = readerDone;
@@ -63,6 +63,29 @@ function App() {
           });
         }
       }
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const lastIdx = newMessages.length - 1;
+        const finalMessage = newMessages[lastIdx].text;
+
+        // 정규식으로 [LOAD_PROBLEM:숫자] 형태를 찾습니다.
+        const match = finalMessage.match(/\[LOAD_PROBLEM:(\d+)\]/);
+        
+        if (match) {
+          const problemId = match[1]; // 숫자(예: 1005)만 추출
+          
+          // 사용자 화면에서는 이 태그가 보이지 않도록 깔끔하게 지워줍니다.
+          newMessages[lastIdx].text = finalMessage.replace(match[0], '').trim();
+
+          // 0.5초 뒤에 탭을 전환하고 문제를 로드합니다. (자연스러운 UX를 위해 약간의 딜레이)
+          setTimeout(() => {
+            setActiveTab('problem'); // 워크스페이스 탭으로 자동 이동!
+            loadProblem(problemId);  // 수정한 함수를 통해 즉시 데이터 로드!
+          }, 500);
+        }
+        return newMessages;
+      });
+      setIsLoading(false);
     } catch (error) {
       console.error("통신 오류:", error);
       setIsLoading(false);
@@ -77,15 +100,17 @@ function App() {
     } catch (error) { console.error("메모 로드 실패:", error); }
   };
 
-  const loadProblem = async () => {
-    if (!searchProblemId.trim()) return;
+  const loadProblem = async (specificId?: string) => {
+    const targetId = specificId || searchProblemId;
+    if (!targetId || !targetId.trim()) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/problem/${searchProblemId}`);
+      const res = await fetch(`${API_BASE_URL}/problem/${targetId}`);
       if (!res.ok) throw new Error("문제를 찾을 수 없습니다.");
       const response = await res.json();
       if (response.status === 'success') {
         setProblemData(response.data);
-        fetchMemo(parseInt(searchProblemId));
+        fetchMemo(parseInt(targetId));
+        if (specificId) setSearchProblemId(targetId);
       }
     } catch (error: any) { alert("문제 로드 실패: " + error.message); }
   };
