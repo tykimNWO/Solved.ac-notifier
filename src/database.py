@@ -63,6 +63,15 @@ class DatabaseManager:
                     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # 5. 채팅 세션 이력 (Gemini와 같은 영구 세션용)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT,
+                    text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
     def upsert_user_stats(self, date, tier, rating, solved_count, streak):
         with self.get_connection() as conn:
@@ -130,3 +139,21 @@ class DatabaseManager:
                     "streak": row[3]
                 }
             return None
+
+    def save_chat_message(self, role, text):
+        """채팅 메시지를 저장합니다."""
+        with self.get_connection() as conn:
+            conn.execute("INSERT INTO chat_messages (role, text) VALUES (?, ?)", (role, text))
+
+    def get_chat_history(self, limit=20):
+        """최근 채팅 이력을 가져옵니다."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT role, text FROM chat_messages ORDER BY id DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            # 최신순으로 가져왔으므로 다시 시간순으로 정렬
+            return [{"role": row[0], "text": row[1]} for row in reversed(rows)]
+
+    def clear_chat_history(self):
+        """채팅 이력을 초기화합니다."""
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM chat_messages")

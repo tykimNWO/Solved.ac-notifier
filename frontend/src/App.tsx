@@ -5,8 +5,10 @@ const API_BASE_URL = 'http://localhost:8000/api';
 
 function App() {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<{role: 'user' | 'ai', text: string}[]>([]);
+  const [messages, setMessages] = useState<{role: 'user' | 'ai', text: string, elapsed?: number}[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [thinkingText, setThinkingText] = useState('');
+  const sendTimeRef = useRef<number>(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [activeTab, setActiveTab] = useState<'chat' | 'problem' | 'editor' | 'memo'>('chat');
@@ -18,6 +20,30 @@ function App() {
   // 메모 전용 상태
   const [memo, setMemo] = useState('');
   const [isSavingMemo, setIsSavingMemo] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 1. 초기 로딩 시 DB에서 히스토리 가져오기
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/chat/history`);
+        const data = await res.json();
+        if (data.status === 'success') {
+          setMessages(data.history);
+        }
+      } catch (err) {
+        console.error("히스토리 로드 실패:", err);
+      }
+    };
+    fetchHistory();
+  }, []);
+
+  // 메시지 추가 시 또는 탭 전환 시 자동 스크롤
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, activeTab]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -38,12 +64,15 @@ function App() {
     setInput('');
     setMessages(prev => [...prev, { role: 'user', text: userText }, { role: 'ai', text: '' }]);
     setIsLoading(true);
+    setThinkingText('');
+    sendTimeRef.current = Date.now();
 
     try {
       const res = await fetch(`${API_BASE_URL}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText }),
+        body: JSON.stringify({ message: userText, 
+          history: messages.map(msg => ({role: msg.role, text: msg.text})) }),
       });
       if (!res.body) throw new Error("스트리밍 오류");
       const reader = res.body.getReader();
@@ -58,7 +87,20 @@ function App() {
           setMessages(prev => {
             const newMessages = [...prev];
             const lastIdx = newMessages.length - 1;
-            newMessages[lastIdx] = { ...newMessages[lastIdx], text: newMessages[lastIdx].text + chunk };
+            const updatedText = newMessages[lastIdx].text + chunk;
+            newMessages[lastIdx] = { ...newMessages[lastIdx], text: updatedText };
+
+            // 사고 과정 실시간 추출 → 로딩 상태에 표시
+            const tStart = updatedText.indexOf('[THOUGHT]');
+            const tEnd = updatedText.indexOf('[/THOUGHT]');
+            if (tStart !== -1) {
+              if (tEnd !== -1) {
+                setThinkingText(updatedText.substring(tStart + 9, tEnd).trim());
+              } else {
+                setThinkingText(updatedText.substring(tStart + 9).trim());
+              }
+            }
+
             return newMessages;
           });
         }
@@ -75,20 +117,47 @@ function App() {
           const problemId = match[1]; // 숫자(예: 1005)만 추출
           
           // 사용자 화면에서는 이 태그가 보이지 않도록 깔끔하게 지워줍니다.
-          newMessages[lastIdx].text = finalMessage.replace(match[0], '').trim();
-
-          // 0.5초 뒤에 탭을 전환하고 문제를 로드합니다. (자연스러운 UX를 위해 약간의 딜레이)
+          newMessages[lastIdx].text = finalMessage.replace(match[0], '').trim() + '\n\n⏳ 추천된 문제(워크스페이스)로 잠시 후 이동합니다...';
+          // 1. 메시지 업데이트 (안내 문구 추가)
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1].text += "\n\n🎯 태영님께 최적화된 문제를 찾았습니다. 3초 후 워크스페이스로 이동합니다...";
+            return updated;
+          });
+          
+          // 2초 뒤에 탭을 전환하고 문제를 로드합니다. (자연스러운 UX를 위해 약간의 딜레이)
           setTimeout(() => {
             setActiveTab('problem'); // 워크스페이스 탭으로 자동 이동!
             loadProblem(problemId);  // 수정한 함수를 통해 즉시 데이터 로드!
-          }, 500);
+          }, 3000);
         }
         return newMessages;
       });
+      // 응답 시간 계산 후 마지막 AI 메시지에 기록
+      const elapsed = Math.round((Date.now() - sendTimeRef.current) / 1000);
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...updated[updated.length - 1], elapsed };
+        return updated;
+      });
       setIsLoading(false);
+      setThinkingText('');
     } catch (error) {
       console.error("통신 오류:", error);
       setIsLoading(false);
+      setThinkingText('');
+    }
+  };
+
+  const handleClearHistory = async () => {
+    if (!confirm("모든 대화 내역을 삭제하시겠습니까?")) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/history`, { method: 'DELETE' });
+      if (res.ok) {
+        setMessages([]);
+      }
+    } catch (err) {
+      console.error("히스토리 삭제 실패:", err);
     }
   };
 
@@ -153,9 +222,16 @@ function App() {
           <div className="max-w-4xl mx-auto p-6 flex flex-col items-center">
             {messages.length === 0 ? (
               <div className="mt-10 md:mt-20 w-full animate-fade-in-up">
-                <div className="text-center mb-10">
-                  <h1 className="text-3xl font-semibold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-purple-600">안녕하세요, 태영님</h1>
-                  <p className="text-transparent bg-clip-text bg-gradient-to-r from-gray-400 to-gray-500 text-sm">최상의 알고리즘 퍼포먼스를 위해 무엇을 도와드릴까요?</p>
+                <div className="flex flex-col items-center text-center mb-10">
+                  <div>
+                    <h1 className="text-3xl font-semibold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-purple-600">안녕하세요, 태영님</h1>
+                    <p className="text-transparent bg-clip-text bg-gradient-to-r from-gray-400 to-gray-500 text-sm">최상의 알고리즘 퍼포먼스를 위해 무엇을 도와드릴까요?</p>
+                  </div>
+                  {messages.length > 0 && (
+                    <button onClick={handleClearHistory} className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-red-400 text-xs transition-all">
+                      대화 초기화
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 gap-3 w-full max-w-2xl mx-auto">
                   {suggestions.map((item, idx) => (
@@ -170,15 +246,78 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="w-full space-y-6 py-4">
-                {messages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-gradient-to-br from-blue-500 via-purple-500 to-purple-600 text-white shadow-lg' : 'bg-[#1E1F20] text-gray-200 border border-gray-800'}`}>
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                    </div>
-                  </div>
-                ))}
+              <div className="w-full max-w-4xl">
+                <div className="flex justify-end mb-4">
+                  <button onClick={handleClearHistory} className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-400 text-xs transition-all">
+                    대화 초기화
+                  </button>
+                </div>
+                <div ref={scrollRef} className="w-full space-y-6 py-4 overflow-y-auto max-h-[70vh] scroll-smooth custom-scrollbar">
+                  {messages.map((msg, i) => {
+                    // [THOUGHT] 태그에서 사고 과정과 본문을 분리
+                    let thoughtText = '';
+                    let contentText = msg.text;
+                    if (msg.role === 'ai') {
+                      const tStart = msg.text.indexOf('[THOUGHT]');
+                      const tEnd = msg.text.indexOf('[/THOUGHT]');
+                      if (tStart !== -1 && tEnd !== -1) {
+                        thoughtText = msg.text.substring(tStart + 9, tEnd).trim();
+                        contentText = msg.text.substring(tEnd + 10).trim();
+                      } else if (tStart !== -1) {
+                        thoughtText = msg.text.substring(tStart + 9).trim();
+                        contentText = '';
+                      }
+                    }
+
+                    const isStreaming = isLoading && i === messages.length - 1;
+
+                    return (
+                      <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[85%] rounded-2xl ${msg.role === 'user' ? 'bg-gradient-to-br from-blue-500 via-purple-500 to-purple-600 text-white shadow-lg p-4' : ''}`}>
+                          {msg.role === 'ai' && isStreaming && !contentText ? (
+                            // 로딩 상태: 사고 과정을 독립 카드로 표시
+                            <div className="p-4 bg-[#1A1B1E] border border-blue-500/20 rounded-2xl animate-pulse-subtle">
+                              <div className="flex items-center gap-2 mb-2 text-blue-400 font-semibold text-sm">
+                                <Brain className="w-4 h-4 animate-spin" style={{ animationDuration: '3s' }} /> 분석 중...
+                              </div>
+                              <p className="text-xs text-gray-400 leading-relaxed">{thinkingText || '질문을 분석하고 최적의 문제를 탐색하고 있습니다...'}</p>
+                              <div className="flex gap-1 items-center mt-3">
+                                <div className="w-1.5 h-1.5 bg-blue-400/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                <div className="w-1.5 h-1.5 bg-blue-400/50 rounded-full animate-bounce" style={{ animationDelay: '200ms' }}></div>
+                                <div className="w-1.5 h-1.5 bg-blue-400/50 rounded-full animate-bounce" style={{ animationDelay: '400ms' }}></div>
+                              </div>
+                            </div>
+                          ) : msg.role === 'ai' ? (
+                            // 답변 완료 상태: 사고 과정 + 본문
+                            <div className="p-4 bg-[#1E1F20] text-gray-200 border border-gray-800 rounded-2xl">
+                              {thoughtText && (
+                                <details className="mb-3 group">
+                                  <summary className="flex items-center gap-2 cursor-pointer text-xs text-blue-400/70 hover:text-blue-400 transition-colors select-none">
+                                    <Brain className="w-3 h-3" />
+                                    <span className="font-semibold">사고 과정 보기</span>
+                                    <span className="text-gray-600 group-open:hidden">▶</span>
+                                    <span className="text-gray-600 hidden group-open:inline">▼</span>
+                                  </summary>
+                                  <div className="mt-2 p-3 bg-black/20 border border-white/5 rounded-xl text-xs text-gray-400 italic leading-relaxed">
+                                    {thoughtText}
+                                  </div>
+                                </details>
+                              )}
+                              {contentText && <p className="text-sm leading-relaxed whitespace-pre-wrap">{contentText}</p>}
+                              {msg.elapsed !== undefined && (
+                                <p className="text-[10px] text-gray-600 mt-3 text-right">⏱ 응답 시간: {msg.elapsed}초</p>
+                              )}
+                            </div>
+                          ) : (
+                            // 사용자 메시지
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
+          </div>
             )}
           </div>
         )}
@@ -188,7 +327,7 @@ function App() {
           <div className="p-6">
             <div className="flex gap-2 mb-8 bg-[#1E1F20] p-1.5 rounded-2xl border border-gray-800 focus-within:border-purple-500/50 transition-all">
               <input type="number" value={searchProblemId} onChange={(e) => setSearchProblemId(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadProblem()} placeholder="문제 번호 입력" className="flex-1 bg-transparent p-2 outline-none text-white text-sm" />
-              <button onClick={loadProblem} className="bg-gradient-to-r from-blue-500 via-purple-500 to-purple-600 hover:opacity-90 p-2.5 rounded-xl transition-all shadow-lg shadow-purple-500/20"><Search className="w-4 h-4 text-white" /></button>
+              <button onClick={() => loadProblem()} className="bg-gradient-to-r from-blue-500 via-purple-500 to-purple-600 hover:opacity-90 p-2.5 rounded-xl transition-all shadow-lg shadow-purple-500/20"><Search className="w-4 h-4 text-white" /></button>
             </div>
             {problemData && (
               <div className="space-y-8 text-sm">

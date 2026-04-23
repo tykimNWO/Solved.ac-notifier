@@ -10,10 +10,14 @@ from pydantic import BaseModel
 
 from fastapi.responses import StreamingResponse
 from src.recommender import stream_chat_response
+from src.database import DatabaseManager
+
+from typing import List
 
 # 💡 DB 경로 설정 (에러 방지를 위한 절대 경로)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, 'data', 'tracker.db') # data 폴더 안에 있다고 가정
+DB_PATH = os.path.join(BASE_DIR, 'data', 'tracker.db')
+db = DatabaseManager(DB_PATH)
 
 # FastAPI 앱 생성
 app = FastAPI(title="AI Tutor API", description="Solved.ac Notifier 백엔드 서버")
@@ -30,8 +34,13 @@ app.add_middleware(
 # ----------------------------------------------------
 # 📌 1. 데이터 모델 정의 (Pydantic) - 들어오는 요청의 형태를 검증
 # ----------------------------------------------------
+class ChatMessage(BaseModel):
+    role: str
+    text: str
+
 class ChatRequest(BaseModel):
     message: str
+    history: List[ChatMessage] = []
 
 class JudgeRequest(BaseModel):
     problem_id: int
@@ -48,13 +57,37 @@ def read_root():
 @app.post("/api/chat/stream")
 async def chat_with_ai_stream(req: ChatRequest):
     """Gemini의 응답을 실시간으로 프론트엔드에 스트리밍합니다."""
-    print(f"📥 [User Message]: {req.message}")
+    print(f"📥 [User Message]: {req.message} (History: {len(req.history)} items)")
     
-    # 스트리밍 제너레이터를 FastAPI의 StreamingResponse에 담아서 반환
-    return StreamingResponse(
-        stream_chat_response(req.message), 
-        media_type="text/plain" # 순수 텍스트 스트림 형태로 전송
-    )
+    # 1. 사용자 메시지 DB 저장
+    db.save_chat_message("user", req.message)
+    
+    # 2. history를 dict list로 변환하여 전달
+    history_dict = [{"role": msg.role, "text": msg.text} for msg in req.history]
+    
+    async def wrapped_stream():
+        full_response = ""
+        # stream_chat_response가 동기 제너레이터라면 아래와 같이 사용
+        for chunk in stream_chat_response(req.message, history_dict):
+            full_response += chunk
+            yield chunk
+        
+        # 3. AI 응답 완료 후 DB 저장
+        if full_response:
+            db.save_chat_message("ai", full_response)
+
+    return StreamingResponse(wrapped_stream(), media_type="text/plain")
+
+@app.get("/api/chat/history")
+async def get_chat_history():
+    """DB에서 이전 대화 내역을 가져옵니다."""
+    return {"status": "success", "history": db.get_chat_history(limit=50)}
+
+@app.delete("/api/chat/history")
+async def clear_chat_history():
+    """대화 내역을 초기화합니다."""
+    db.clear_chat_history()
+    return {"status": "success", "message": "History cleared"}
 
 @app.get("/api/problem/{problem_id}")
 async def get_problem(problem_id: int):
