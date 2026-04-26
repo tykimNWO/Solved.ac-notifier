@@ -3,6 +3,16 @@ import { Send, Sparkles, Brain, Code2, MessageSquare, FileCode2, Search, Code, N
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
+const getTierInfo = (tier: number) => {
+  if (!tier || tier === 0) return { name: "Unrated", color: "text-gray-400", bg: "bg-gray-400/10", border: "border-gray-400/30" };
+  if (tier <= 5) return { name: `Bronze ${6 - tier}`, color: "text-[#ad5600]", bg: "bg-[#ad5600]/10", border: "border-[#ad5600]/30" };
+  if (tier <= 10) return { name: `Silver ${11 - tier}`, color: "text-[#435f7a]", bg: "bg-[#435f7a]/10", border: "border-[#435f7a]/30" };
+  if (tier <= 15) return { name: `Gold ${16 - tier}`, color: "text-[#ec9a00]", bg: "bg-[#ec9a00]/10", border: "border-[#ec9a00]/30" };
+  if (tier <= 20) return { name: `Platinum ${21 - tier}`, color: "text-[#27e2a4]", bg: "bg-[#27e2a4]/10", border: "border-[#27e2a4]/30" };
+  if (tier <= 25) return { name: `Diamond ${26 - tier}`, color: "text-[#00b4fc]", bg: "bg-[#00b4fc]/10", border: "border-[#00b4fc]/30" };
+  return { name: `Ruby ${31 - tier}`, color: "text-[#ff0062]", bg: "bg-[#ff0062]/10", border: "border-[#ff0062]/30" };
+};
+
 function App() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<{role: 'user' | 'ai', text: string, elapsed?: number}[]>([]);
@@ -331,6 +341,29 @@ function App() {
             </div>
             {problemData && (
               <div className="space-y-8 text-sm">
+                
+                {/* 문제 상단 정보 (제목, 티어, 태그) */}
+                <div className="mb-6 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2.5 py-1 text-xs font-bold rounded-lg border shadow-sm ${getTierInfo(problemData.tier).bg} ${getTierInfo(problemData.tier).color} ${getTierInfo(problemData.tier).border}`}>
+                      {getTierInfo(problemData.tier).name}
+                    </span>
+                    <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-300">
+                      {searchProblemId}. {problemData.title || '문제'}
+                    </h2>
+                  </div>
+                  
+                  {problemData.tags && problemData.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {problemData.tags.map((tag: string, idx: number) => (
+                        <span key={idx} className="px-3 py-1 text-xs text-purple-300 bg-purple-500/10 border border-purple-500/30 rounded-full shadow-sm shadow-purple-500/10 backdrop-blur-sm">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-4">
                   <h3 className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 inline-block border-b border-purple-500/30 pb-1">문제 설명</h3>
                   <div className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: problemData.description }} />

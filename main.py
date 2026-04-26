@@ -96,14 +96,23 @@ async def get_problem(problem_id: int):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT description, input_desc, output_desc, sample_inputs, sample_outputs, problem_limit
-            FROM problem_details 
-            WHERE problem_id = ?
+            SELECT pd.description, pd.input_desc, pd.output_desc, pd.sample_inputs, pd.sample_outputs, pd.problem_limit,
+                   p.title, p.tier, p.tags
+            FROM problem_details pd
+            JOIN problems p ON pd.problem_id = p.problem_id
+            WHERE pd.problem_id = ?
         """, (problem_id,))
         row = cursor.fetchone()
         conn.close()
 
         if row:
+            tags_list = []
+            if row[8]:
+                try:
+                    tags_list = json.loads(row[8])
+                except json.JSONDecodeError:
+                    pass
+
             return {
                 "status": "success",
                 "data": {
@@ -113,6 +122,9 @@ async def get_problem(problem_id: int):
                     "sample_inputs": json.loads(row[3]) if row[3] else [],
                     "sample_outputs": json.loads(row[4]) if row[4] else [],
                     "problem_limit": row[5] or "",
+                    "title": row[6] or "",
+                    "tier": row[7] or 0,
+                    "tags": tags_list
                 }
             }
         else:
