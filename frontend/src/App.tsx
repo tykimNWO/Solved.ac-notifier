@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Brain, Code2, MessageSquare, FileCode2, Search, Code, Notebook } from 'lucide-react';
+import { Send, Sparkles, Brain, Code2, MessageSquare, FileCode2, Search, Code, Notebook, CheckCircle2 } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -344,13 +344,19 @@ function App() {
                 
                 {/* 문제 상단 정보 (제목, 티어, 태그) */}
                 <div className="mb-6 space-y-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <span className={`px-2.5 py-1 text-xs font-bold rounded-lg border shadow-sm ${getTierInfo(problemData.tier).bg} ${getTierInfo(problemData.tier).color} ${getTierInfo(problemData.tier).border}`}>
                       {getTierInfo(problemData.tier).name}
                     </span>
                     <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-300">
                       {searchProblemId}. {problemData.title || '문제'}
                     </h2>
+                    {problemData.is_solved && (
+                      <span className="flex items-center gap-1.5 px-3 py-1 text-xs font-bold text-green-400 bg-green-500/10 border border-green-500/30 rounded-full shadow-sm">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Solved!
+                      </span>
+                    )}
                   </div>
                   
                   {problemData.tags && problemData.tags.length > 0 && (

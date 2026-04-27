@@ -113,6 +113,10 @@ async def get_problem(problem_id: int):
                 except json.JSONDecodeError:
                     pass
 
+            # Check if the problem is solved
+            solved_ids = db.get_solved_problem_ids()
+            is_solved = problem_id in solved_ids
+
             return {
                 "status": "success",
                 "data": {
@@ -124,7 +128,8 @@ async def get_problem(problem_id: int):
                     "problem_limit": row[5] or "",
                     "title": row[6] or "",
                     "tier": row[7] or 0,
-                    "tags": tags_list
+                    "tags": tags_list,
+                    "is_solved": is_solved
                 }
             }
         else:
