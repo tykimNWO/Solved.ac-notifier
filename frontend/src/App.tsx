@@ -1,5 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Sparkles, Brain, Code2, MessageSquare, FileCode2, Search, Code, Notebook, CheckCircle2 } from 'lucide-react';
+import CodeMirror from '@uiw/react-codemirror';
+import { python } from '@codemirror/lang-python';
+import { markdown } from '@codemirror/lang-markdown';
+import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -81,8 +85,11 @@ function App() {
       const res = await fetch(`${API_BASE_URL}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, 
-          history: messages.map(msg => ({role: msg.role, text: msg.text})) }),
+        body: JSON.stringify({ 
+          message: userText, 
+          history: messages.map(msg => ({role: msg.role, text: msg.text})),
+          current_problem_id: parseInt(searchProblemId) || null
+        }),
       });
       if (!res.body) throw new Error("스트리밍 오류");
       const reader = res.body.getReader();
@@ -429,8 +436,37 @@ function App() {
                 {isLoading ? '채점 중...' : '코드 채점하기'}
               </button>
             </div>
-            <div className="flex-1 bg-[#1E1F20] rounded-2xl border border-gray-800 p-4 font-mono shadow-inner min-h-[400px]">
-              <textarea value={userCode} onChange={(e) => setUserCode(e.target.value)} className="w-full h-full bg-transparent outline-none text-blue-300 text-sm leading-relaxed resize-none custom-scrollbar" spellCheck={false} />
+            <div className="flex-1 bg-[#1E1F20] rounded-2xl border border-gray-800 overflow-hidden font-mono shadow-inner min-h-[400px]">
+              <CodeMirror
+                value={userCode}
+                height="100%"
+                theme={vscodeDark}
+                extensions={[python()]}
+                onChange={(value) => setUserCode(value)}
+                className="text-sm h-full"
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  dropCursor: true,
+                  allowMultipleSelections: true,
+                  indentOnInput: true,
+                  syntaxHighlighting: true,
+                  bracketMatching: true,
+                  closeBrackets: true,
+                  autocompletion: true,
+                  rectangularSelection: true,
+                  crosshairCursor: true,
+                  highlightActiveLine: true,
+                  highlightSelectionMatches: true,
+                  closeBracketsKeymap: true,
+                  defaultKeymap: true,
+                  searchKeymap: true,
+                  historyKeymap: true,
+                  foldKeymap: true,
+                  completionKeymap: true,
+                  lintKeymap: true,
+                }}
+              />
             </div>
             {judgeResults && (
               <div className="mt-4 space-y-2">
@@ -460,8 +496,16 @@ function App() {
                 {isSavingMemo ? '저장 중...' : '메모 저장'}
               </button>
             </div>
-            <div className="flex-1 bg-[#1E1F20] rounded-2xl border border-gray-800 p-5 shadow-inner">
-              <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="이 문제의 핵심 아이디어를 기록하세요..." className="w-full h-full bg-transparent outline-none text-gray-300 text-sm leading-relaxed resize-none custom-scrollbar" spellCheck={false} />
+            <div className="flex-1 bg-[#1E1F20] rounded-2xl border border-gray-800 overflow-hidden shadow-inner">
+              <CodeMirror
+                value={memo}
+                height="100%"
+                theme={vscodeDark}
+                extensions={[markdown()]}
+                onChange={(value) => setMemo(value)}
+                className="text-sm h-full"
+                placeholder="이 문제의 핵심 아이디어를 기록하세요..."
+              />
             </div>
           </div>
         )}

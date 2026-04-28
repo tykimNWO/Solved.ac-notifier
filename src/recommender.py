@@ -143,14 +143,31 @@ def retrieve_similar_problems(query: str, solved_ids: list, exclude_solved: bool
         print(f"❌ 검색 에러: {e}")
         return ""
 
-def stream_chat_response(message: str, history: list=[]):
+def stream_chat_response(message: str, history: list=[], current_problem_id: int=None):
     """RAG 파이프라인을 실행하고 결과를 실시간으로 반환합니다."""
-    print(f"🚀 [RAG 시작] 질문: {message}")
+    print(f"🚀 [RAG 시작] 질문: {message} (현재 문제: {current_problem_id})")
     
     # 0. 사용자 정보 및 의도 파악
     solved_ids = db.get_solved_problem_ids()
     user_stats = db.get_latest_user_stats()
     
+    # 0.2. 현재 보고 있는 문제 정보 가져오기 (세션 컨텍스트)
+    current_problem_context = ""
+    if current_problem_id:
+        try:
+            with db.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT p.title, p.tier, pd.description 
+                    FROM problems p 
+                    JOIN problem_details pd ON p.problem_id = pd.problem_id 
+                    WHERE p.problem_id = ?
+                """, (current_problem_id,))
+                row = cursor.fetchone()
+                if row:
+                    current_problem_context = f"\n[현재 학습자가 보고 있는 문제]: {current_problem_id}. {row[0]} (티어: {row[1]})\n[문제 설명 요약]: {row[2][:500]}..."
+        except Exception as e:
+            print(f"⚠️ 현재 문제 정보 로드 실패: {e}")
+
     # 사용자가 '다시', '복습', '풀었던' 등의 키워드를 사용했는지 확인
     review_keywords = ["복습", "다시", "풀었던", "이미 푼", "review", "again", "solved"]
     is_review_request = any(keyword in message for keyword in review_keywords)
@@ -206,6 +223,7 @@ def stream_chat_response(message: str, history: list=[]):
     
     augmented_prompt = f"""사용자의 질문에 답변하세요.
 {user_context}
+{current_problem_context}
 
 필요하다면 아래의 <검색된_문제_목록>을 참고하여 추천을 진행하세요.
 {prompt_instruction}

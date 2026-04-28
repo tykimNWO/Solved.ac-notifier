@@ -41,6 +41,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessage] = []
+    current_problem_id: int = None
 
 class JudgeRequest(BaseModel):
     problem_id: int
@@ -68,7 +69,7 @@ async def chat_with_ai_stream(req: ChatRequest):
     async def wrapped_stream():
         full_response = ""
         # stream_chat_response가 동기 제너레이터라면 아래와 같이 사용
-        for chunk in stream_chat_response(req.message, history_dict):
+        for chunk in stream_chat_response(req.message, history_dict, req.current_problem_id):
             full_response += chunk
             yield chunk
         
