@@ -1,11 +1,11 @@
-# solved.ac notifier
+# Solved.ac-with-LLMCoach
 
 React 기반 프론트엔드와 FastAPI 백엔드를 묶어서, 백준 문제 상세/예제/메모/채점 및 AI 채팅을 제공하는 프로젝트입니다.
 
 ## 아키텍처 (현재 리포 기준)
 
 ```
-solved-ac-notifier/
+Solved.ac-with-LLMCoach/
 ├── main.py                  # FastAPI 백엔드 엔트리 (문제 조회/채점/메모/스트리밍 채팅)
 ├── config.py                # 로컬 설정 (민감정보는 환경변수로 주입)
 ├── data/

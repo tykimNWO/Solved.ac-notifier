@@ -20,7 +20,7 @@ DB_PATH = os.path.join(BASE_DIR, 'data', 'tracker.db')
 db = DatabaseManager(DB_PATH)
 
 # FastAPI 앱 생성
-app = FastAPI(title="AI Tutor API", description="Solved.ac Notifier 백엔드 서버")
+app = FastAPI(title="Solved.ac-with-LLMCoach API", description="Solved.ac-with-LLMCoach 백엔드 서버")
 
 # 💡 CORS 설정 (React의 5173 포트에서 오는 요청을 허용)
 app.add_middleware(

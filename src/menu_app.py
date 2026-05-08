@@ -2,9 +2,9 @@ import rumps
 import multiprocessing
 from src.chat_window import open_chat_window
 
-class SolvedNotifierApp(rumps.App):
+class SolvedAcWithLLMCoachApp(rumps.App):
     def __init__(self):
-        super(SolvedNotifierApp, self).__init__("🔥 34") # 임시 스트릭 표시
+        super(SolvedAcWithLLMCoachApp, self).__init__("🔥 34") # 임시 스트릭 표시
         self.menu = [
             "내 정보 확인",
             None, # 구분선(Separator)
