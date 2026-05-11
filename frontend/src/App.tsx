@@ -15,6 +15,7 @@ interface RecommendationStep {
   label: string;
   status: RecommendationStepStatus;
   timestamp?: number;
+  elapsedMs?: number;
 }
 
 interface RecommendedProblem {
@@ -33,6 +34,7 @@ interface RecommendationResult {
   recommendations: RecommendedProblem[];
   elapsedMs: number;
   summary?: string;
+  processSteps?: RecommendationStep[];
 }
 
 interface ProblemData {
@@ -66,6 +68,7 @@ interface ChatMessage {
 
 const RECOMMENDATION_RESULT_START = '[RECOMMENDATION_RESULT]';
 const RECOMMENDATION_RESULT_END = '[/RECOMMENDATION_RESULT]';
+const RECOMMENDATION_DEBUG_STORAGE_KEY = 'solved-ac-with-llmcoach:recommendation-debug';
 
 const RECOMMENDATION_STEPS: RecommendationStep[] = [
   { id: 'profile', label: 'solved.ac 프로필 데이터를 확인하고 있습니다.', status: 'pending' },
@@ -109,6 +112,70 @@ const formatElapsed = (ms: number) => `${(ms / 1000).toFixed(1)}초`;
 
 const createInitialRecommendationSteps = (): RecommendationStep[] =>
   RECOMMENDATION_STEPS.map((step) => ({ ...step, status: 'pending' }));
+
+const normalizeProcessSteps = (rawSteps: unknown): RecommendationStep[] | undefined => {
+  if (!Array.isArray(rawSteps)) return undefined;
+  const steps = rawSteps
+    .map((item): RecommendationStep | null => {
+      if (!item || typeof item !== 'object') return null;
+      const raw = item as Record<string, unknown>;
+      const id = typeof raw.id === 'string' ? raw.id : '';
+      const fallback = RECOMMENDATION_STEPS.find((step) => step.id === id);
+      const label = typeof raw.label === 'string' && raw.label.trim()
+        ? raw.label
+        : fallback?.label;
+      if (!id || !label) return null;
+      return {
+        id,
+        label,
+        status: 'completed',
+        elapsedMs: typeof raw.elapsedMs === 'number' ? raw.elapsedMs : undefined,
+      };
+    })
+    .filter((item): item is RecommendationStep => item !== null);
+
+  return steps.length > 0 ? steps : undefined;
+};
+
+const getRecommendationStorageKey = (result: RecommendationResult) =>
+  result.recommendations
+    .map((problem) => `${problem.rank}:${problem.problemId}`)
+    .join('|') || result.summary || '';
+
+const readRecommendationDebugStore = (): Record<string, Pick<RecommendationResult, 'elapsedMs' | 'processSteps'>> => {
+  try {
+    const raw = window.localStorage.getItem(RECOMMENDATION_DEBUG_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveRecommendationDebugSnapshot = (result: RecommendationResult, steps: RecommendationStep[]) => {
+  const key = getRecommendationStorageKey(result);
+  if (!key) return;
+  const store = readRecommendationDebugStore();
+  store[key] = {
+    elapsedMs: result.elapsedMs,
+    processSteps: steps.map((step) => ({
+      ...step,
+      status: step.status === 'error' ? 'error' : 'completed',
+    })),
+  };
+  window.localStorage.setItem(RECOMMENDATION_DEBUG_STORAGE_KEY, JSON.stringify(store));
+};
+
+const attachStoredRecommendationDebug = (result: RecommendationResult): RecommendationResult => {
+  const stored = readRecommendationDebugStore()[getRecommendationStorageKey(result)];
+  if (!stored) return result;
+  return {
+    ...result,
+    elapsedMs: stored.elapsedMs || result.elapsedMs,
+    processSteps: stored.processSteps || result.processSteps,
+  };
+};
 
 const isRecommendationPrompt = (text: string) =>
   ['추천', '문제 줘', '문제 찾아', '풀 문제', '복습', '약점', '오늘의 추천'].some((keyword) => text.includes(keyword));
@@ -156,6 +223,7 @@ const normalizeRecommendationResponse = (response: unknown, elapsedMs: number): 
     recommendations,
     elapsedMs,
     summary: typeof data.summary === 'string' ? data.summary : undefined,
+    processSteps: normalizeProcessSteps(data.processSteps),
   };
 };
 
@@ -180,6 +248,7 @@ function App() {
   const sendTimeRef = useRef<number>(0);
   const recommendationStartRef = useRef<number>(0);
   const recommendationTimerRef = useRef<number | null>(null);
+  const recommendationStepsRef = useRef<RecommendationStep[]>(createInitialRecommendationSteps());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [recommendationStatus, setRecommendationStatus] = useState<RecommendationStatus>('idle');
   const [recommendationSteps, setRecommendationSteps] = useState<RecommendationStep[]>(createInitialRecommendationSteps);
@@ -209,7 +278,12 @@ function App() {
             ? data.history.map((msg: { role: string; text: string }) => ({
               role: msg.role === 'user' ? 'user' as const : 'ai' as const,
               text: stripRecommendationMarkup(msg.text || ''),
-              recommendationResult: msg.role === 'ai' ? parseRecommendationResult(msg.text || '', 0) ?? undefined : undefined,
+              recommendationResult: msg.role === 'ai'
+                ? (() => {
+                  const result = parseRecommendationResult(msg.text || '', 0);
+                  return result ? attachStoredRecommendationDebug(result) : undefined;
+                })()
+                : undefined,
             }))
             : [];
           setMessages(history);
@@ -258,8 +332,10 @@ function App() {
   };
 
   const beginRecommendationFlow = () => {
+    const initialSteps = createInitialRecommendationSteps();
     setRecommendationStatus('loading');
-    setRecommendationSteps(createInitialRecommendationSteps());
+    recommendationStepsRef.current = initialSteps;
+    setRecommendationSteps(initialSteps);
     setRecommendationError('');
     setIsProcessOpen(true);
     startRecommendationTimer();
@@ -268,11 +344,15 @@ function App() {
   const completeRecommendationFlow = (status: RecommendationStatus) => {
     stopRecommendationTimer();
     setRecommendationStatus(status);
-    setRecommendationSteps((prev) => prev.map((step) => {
-      if (status === 'success') return { ...step, status: 'completed' };
-      if (step.status === 'running') return { ...step, status: 'error' };
-      return step;
-    }));
+    setRecommendationSteps((prev) => {
+      const next: RecommendationStep[] = prev.map((step) => {
+        if (status === 'success') return { ...step, status: 'completed' };
+        if (step.status === 'running') return { ...step, status: 'error' };
+        return step;
+      });
+      recommendationStepsRef.current = next;
+      return next;
+    });
   };
 
   const markRecommendationStepFromChunk = (chunk: string) => {
@@ -281,12 +361,24 @@ function App() {
       const stepId = match[1];
       const stepIndex = RECOMMENDATION_STEPS.findIndex((step) => step.id === stepId);
       if (stepIndex === -1) return;
+      const now = Date.now();
       setRecommendationStatus('reasoning');
-      setRecommendationSteps((prev) => prev.map((step, index) => {
-        if (index < stepIndex) return { ...step, status: 'completed' };
-        if (index === stepIndex) return { ...step, status: 'running', timestamp: Date.now() };
-        return step.status === 'completed' ? step : { ...step, status: 'pending' };
-      }));
+      setRecommendationSteps((prev) => {
+        const next: RecommendationStep[] = prev.map((step, index) => {
+          if (index < stepIndex) return { ...step, status: 'completed' };
+          if (index === stepIndex) {
+            return {
+              ...step,
+              status: 'running',
+              timestamp: now,
+              elapsedMs: recommendationStartRef.current ? now - recommendationStartRef.current : undefined,
+            };
+          }
+          return step.status === 'completed' ? step : { ...step, status: 'pending' };
+        });
+        recommendationStepsRef.current = next;
+        return next;
+      });
     });
   };
 
@@ -355,6 +447,14 @@ function App() {
       const recommendationResult = requestIsRecommendation
         ? parseRecommendationResult(streamedText, elapsedMs)
         : null;
+      const completedRecommendationSteps = recommendationStepsRef.current.map((step) => ({
+        ...step,
+        status: 'completed' as RecommendationStepStatus,
+      }));
+      if (recommendationResult) {
+        recommendationResult.processSteps = completedRecommendationSteps;
+        saveRecommendationDebugSnapshot(recommendationResult, completedRecommendationSteps);
+      }
       setMessages(prev => {
         const updated = [...prev];
         const lastMessage = updated[updated.length - 1];
@@ -401,6 +501,7 @@ function App() {
     try {
       const res = await fetch(`${API_BASE_URL}/chat/history`, { method: 'DELETE' });
       if (res.ok) {
+        window.localStorage.removeItem(RECOMMENDATION_DEBUG_STORAGE_KEY);
         setMessages([]);
       }
     } catch (err) {
@@ -534,6 +635,27 @@ function App() {
           <div className="text-sm font-semibold text-white">오늘의 추천 문제 Top {result.recommendations.length}</div>
           <div className="text-xs text-gray-500">추천 완료 · 총 {formatElapsed(result.elapsedMs)}</div>
           {result.summary && <p className="mt-2 text-xs leading-relaxed text-gray-400">{result.summary}</p>}
+          {result.processSteps && result.processSteps.length > 0 && (
+            <div className="mt-3 rounded-xl border border-white/5 bg-black/20 p-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-blue-300">
+                <ListChecks className="w-3.5 h-3.5" />
+                추천 과정 로그
+              </div>
+              <div className="space-y-1.5">
+                {result.processSteps.map((step) => (
+                  <div key={step.id} className="flex items-start justify-between gap-3 text-[11px] text-gray-400">
+                    <div className="flex min-w-0 items-start gap-2">
+                      {renderStepIcon(step.status)}
+                      <span className="leading-relaxed">{step.label}</span>
+                    </div>
+                    {step.elapsedMs !== undefined && (
+                      <span className="shrink-0 text-gray-600">+{formatElapsed(step.elapsedMs)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div className="grid grid-cols-1 gap-3">
           {result.recommendations.map((problem) => {

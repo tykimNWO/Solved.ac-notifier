@@ -47,21 +47,23 @@ def analyze_intent_and_rewrite(message: str, history: list) -> tuple[bool, str, 
     """
     과거 대화를 바탕으로 사용자의 의도를 파악하고, ChromaDB에 던질 검색어를 정제합니다.
     """
-    # 1차 방어선 (명시적 키워드 우선순위)
-    review_keywords = ["풀었던", "복습", "다시", "기존에", "풀어본", "저번에", "아까"]
-    is_explicit_review = any(keyword in message for keyword in review_keywords)
-    
     # 최근 대화 6개 정도만 집중적으로 참고
     history_text = "\n".join([f"{msg['role']}: {msg['text']}" for msg in history[-6:]])
     
     prompt = f"""
-    당신은 사용자의 대화 맥락을 추적하고 최적의 검색 쿼리를 생성하는 의도 분석기입니다.
+    당신은 알고리즘 문제 추천 요청을 분류하는 의도 분석기입니다.
+    현재 질문을 가장 중요하게 보고, 대화 이력은 애매한 지시어를 해석할 때만 참고하세요.
     
-    [핵심 지침: 세션 모드 유지]
-    1. 사용자가 이전 대화에서 '복습(review)'을 원했다면, "다른 거", "더 추천해줘"라는 질문에도 **반드시 'review' 상태를 유지**해야 합니다.
-    2. 명시적으로 "이제 안 푼 거 줘", "새로운 문제", "다른 유형의 신규 문제"라고 해야만 'new'로 바뀝니다.
-    3. 근거 없는 구체화(예: 말하지 않은 골드 5 티어 추가)는 절대 금지입니다.
-    4. 내부 추론 과정을 쓰지 말고, 사용자에게 보여줄 수 있는 한 문장 상태 요약만 작성하세요.
+    [분류 기준]
+    - intent는 반드시 "new" 또는 "review" 중 하나입니다.
+    - "new": 사용자가 아직 풀지 않은 문제, 새로운 문제, 미해결 문제, 안 푼 문제를 원합니다.
+    - "review": 사용자가 이미 풀었던 문제, 복습, 다시 풀 문제, 오답/기억 확인을 원합니다.
+    - 현재 질문에 신규 문제 의도가 명시되어 있으면, "다시", "또", "다른 것" 같은 재요청 표현이 있어도 intent는 "new"입니다.
+    - 현재 질문이 "다른 것", "더 추천해줘"처럼 애매하면 최근 대화의 모드를 유지합니다.
+    - 신규/복습 여부가 끝까지 불명확하면 intent는 "new"로 둡니다. 기본 추천은 이미 푼 문제를 제외하는 편이 안전합니다.
+    - search_query에는 신규/복습 같은 모드 표현을 넣지 말고, 알고리즘 태그/난이도/학습 의도만 간결하게 남기세요.
+    - 근거 없는 구체화(예: 말하지 않은 골드 5 티어 추가)는 절대 금지입니다.
+    - 내부 추론 과정은 쓰지 말고, 사용자에게 보여줄 수 있는 한 문장 상태 요약만 작성하세요.
     
     [대화 이력]
     {history_text}
@@ -69,14 +71,11 @@ def analyze_intent_and_rewrite(message: str, history: list) -> tuple[bool, str, 
     [현재 질문]
     user: {message}
     
-    [작업 지침]
-    - `status_summary`에는 사용자에게 노출해도 안전한 진행 요약만 작성하세요.
-    
     [출력 형식 (반드시 JSON만)]
     {{
-        "status_summary": "대화 맥락을 확인해 복습 추천 모드로 검색어를 정리했습니다.",
-        "intent": "review",
-        "search_query": "그리디 알고리즘"
+        "intent": "new",
+        "search_query": "BFS DFS",
+        "status_summary": "안 푼 문제를 우선 추천하도록 검색 조건을 정리했습니다."
     }}
     """
     
@@ -94,18 +93,14 @@ def analyze_intent_and_rewrite(message: str, history: list) -> tuple[bool, str, 
         status_summary = result.get('status_summary', '대화 맥락을 확인해 추천 검색어를 정리했습니다.')
         print(f"🧭 [추천 상태 요약]: {status_summary}")
         
-        # 명시적 키워드가 있거나 LLM이 review라고 판단한 경우 복습 모드 유지
-        if is_explicit_review:
-            exclude_solved = False
-        else:
-            exclude_solved = (result.get("intent") != "review")
-            
-        refined_query = result.get("search_query", message)
+        intent = result.get("intent")
+        exclude_solved = intent != "review"
+        refined_query = result.get("search_query") or message
         return exclude_solved, refined_query, status_summary
         
     except Exception as e:
         print(f"⚠️ 의도 분석 실패, 기본값 진행: {e}")
-        return not is_explicit_review, message, "대화 이력을 참고하여 추천을 진행합니다."
+        return True, message, "의도 분석을 완료하지 못해 안 푼 문제를 우선으로 추천합니다."
 
 def is_recommendation_request(message: str) -> bool:
     keywords = ["추천", "문제 줘", "문제 찾아", "풀 문제", "복습", "약점", "오늘의 추천"]
