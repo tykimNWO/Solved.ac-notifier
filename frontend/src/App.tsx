@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Brain, Code2, MessageSquare, FileCode2, Search, Code, Notebook, CheckCircle2, Clock3, ListChecks, Loader2, AlertCircle, ExternalLink, Circle } from 'lucide-react';
+import { Send, Sparkles, Brain, Code2, MessageSquare, FileCode2, Search, Code, Notebook, CheckCircle2, Clock3, ListChecks, Loader2, AlertCircle, ExternalLink, Circle, LayoutDashboard } from 'lucide-react';
 import CodeMirror from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
 import { markdown } from '@codemirror/lang-markdown';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
+import { Dashboard } from './components/Dashboard/Dashboard';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -57,6 +58,13 @@ interface JudgeResult {
   error?: string;
   actual?: string;
   expected?: string;
+}
+
+interface JudgeResponse {
+  status: string;
+  results?: JudgeResult[];
+  is_solved?: boolean;
+  detail?: string;
 }
 
 interface ChatMessage {
@@ -256,11 +264,12 @@ function App() {
   const [recommendationError, setRecommendationError] = useState('');
   const [isProcessOpen, setIsProcessOpen] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'problem' | 'editor' | 'memo'>('chat');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'chat' | 'problem' | 'editor' | 'memo'>('chat');
   const [searchProblemId, setSearchProblemId] = useState('');
   const [problemData, setProblemData] = useState<ProblemData | null>(null);
   const [userCode, setUserCode] = useState('# 여기에 파이썬 코드를 작성하세요\n\nimport sys\n\ndef solution():\n    # input = sys.stdin.readline\n    pass\n\nif __name__ == "__main__":\n    solution()');
   const [judgeResults, setJudgeResults] = useState<JudgeResult[] | null>(null);
+  const [judgeSolved, setJudgeSolved] = useState(false);
   
   // 메모 전용 상태
   const [memo, setMemo] = useState('');
@@ -545,14 +554,18 @@ function App() {
     if (!searchProblemId || isLoading) return;
     setIsLoading(true);
     setJudgeResults(null);
+    setJudgeSolved(false);
     try {
       const res = await fetch(`${API_BASE_URL}/judge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ problem_id: parseInt(searchProblemId), code: userCode }),
       });
-      const response = await res.json();
-      if (response.status === 'success') setJudgeResults(response.results);
+      const response: JudgeResponse = await res.json();
+      if (response.status === 'success') {
+        setJudgeResults(response.results || []);
+        setJudgeSolved(Boolean(response.is_solved));
+      }
       else alert(response.detail || "채점 중 오류 발생");
     } catch { alert("서버 연결 실패"); } finally { setIsLoading(false); }
   };
@@ -709,6 +722,10 @@ function App() {
   return (
     <div className="h-[100dvh] flex flex-col bg-[#131314] text-gray-100 font-sans overflow-hidden">
       <div className="flex-1 overflow-y-auto custom-scrollbar pb-24">
+        {/* Tab 0: 코딩 대시보드 */}
+        {activeTab === 'dashboard' && (
+          <Dashboard />
+        )}
         
         {/* Tab 1: AI 채팅 */}
         {activeTab === 'chat' && (
@@ -919,6 +936,11 @@ function App() {
             </div>
             {judgeResults && (
               <div className="mt-4 space-y-2">
+                {judgeSolved && (
+                  <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-xs font-semibold text-green-300">
+                    모든 예제 채점에 성공해 solved 로그에 기록했습니다. 대시보드를 다시 열면 최신 통계에 반영됩니다.
+                  </div>
+                )}
                 {judgeResults.map((res, idx) => (
                   <div key={idx} className={`p-4 rounded-xl border ${res.result === 'Success' ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
                     <div className="flex justify-between items-center text-xs font-bold">
@@ -970,6 +992,7 @@ function App() {
             </div>
           )}
           <div className="flex gap-1">
+            <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'dashboard' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'dashboard' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<LayoutDashboard className="w-5 h-5 relative z-10" /></button>
             <button onClick={() => setActiveTab('chat')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'chat' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'chat' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<MessageSquare className="w-5 h-5 relative z-10" /></button>
             <button onClick={() => setActiveTab('problem')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'problem' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'problem' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<FileCode2 className="w-5 h-5 relative z-10" /></button>
             <button onClick={() => setActiveTab('editor')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'editor' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'editor' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<Code className="w-5 h-5 relative z-10" /></button>
