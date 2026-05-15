@@ -1,20 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 import { fetchDashboard } from '../../services/dashboard';
 import type { DashboardResponse } from '../../types/dashboard';
 import { DifficultyChart } from './DifficultyChart';
+import { LocalRatingSummaryCard } from './LocalRatingSummaryCard';
 import { ProfileSummaryCard } from './ProfileSummaryCard';
+import { RatingBreakdownCard } from './RatingBreakdownCard';
 import { RecentSolvedList } from './RecentSolvedList';
 import { SolvedTrendChart } from './SolvedTrendChart';
 import { StatsCards } from './StatsCards';
 import { TagChart } from './TagChart';
 
-export function Dashboard() {
+interface DashboardProps {
+  onOpenProblem: (problemId: number | string) => void;
+  onReady?: () => void;
+}
+
+export function Dashboard({ onOpenProblem, onReady }: DashboardProps) {
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const shouldNotifyReadyRef = useRef(true);
 
-  const loadDashboard = async () => {
+  const loadDashboard = async (options?: { restoreOnReady?: boolean }) => {
+    shouldNotifyReadyRef.current = options?.restoreOnReady ?? false;
     setIsLoading(true);
     setError('');
     try {
@@ -29,10 +38,17 @@ export function Dashboard() {
   };
 
   useEffect(() => {
-    loadDashboard();
+    loadDashboard({ restoreOnReady: true });
   }, []);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (!isLoading && dashboard && shouldNotifyReadyRef.current) {
+      shouldNotifyReadyRef.current = false;
+      onReady?.();
+    }
+  }, [dashboard, isLoading, onReady]);
+
+  if (isLoading && !dashboard) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 text-sm text-gray-400">
@@ -52,7 +68,7 @@ export function Dashboard() {
           <p className="mt-2 text-sm text-gray-400">{error || '잠시 후 다시 시도해 주세요.'}</p>
           <button
             type="button"
-            onClick={loadDashboard}
+            onClick={() => loadDashboard({ restoreOnReady: true })}
             className="mt-5 inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-gray-200 hover:bg-white/5"
           >
             <RefreshCw className="h-4 w-4" />
@@ -76,11 +92,12 @@ export function Dashboard() {
         </div>
         <button
           type="button"
-          onClick={loadDashboard}
-          className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-gray-300 hover:bg-white/5"
+          onClick={() => loadDashboard()}
+          disabled={isLoading}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-gray-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <RefreshCw className="h-4 w-4" />
-          새로고침
+          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          {isLoading ? '새로고침 중' : '새로고침'}
         </button>
       </div>
 
@@ -97,13 +114,15 @@ export function Dashboard() {
 
       <div className="space-y-5">
         <ProfileSummaryCard profile={dashboard.profile} />
+        <LocalRatingSummaryCard localRating={dashboard.stats.localRating} profile={dashboard.profile} />
+        <RatingBreakdownCard localRating={dashboard.stats.localRating} />
         <StatsCards stats={dashboard.stats} />
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <DifficultyChart data={dashboard.stats.difficultyDistribution} totalSolved={dashboard.stats.totalSolved} />
-          <TagChart data={dashboard.stats.tagDistribution} totalSolved={dashboard.stats.totalSolved} />
+          <TagChart data={dashboard.stats.localRating?.tagRatings} totalSolved={dashboard.stats.totalSolved} />
           <SolvedTrendChart data={dashboard.stats.dailySolvedTrend} />
         </div>
-        <RecentSolvedList problems={dashboard.stats.recentProblems} />
+        <RecentSolvedList problems={dashboard.stats.recentProblems} onOpenProblem={onOpenProblem} />
       </div>
     </div>
   );

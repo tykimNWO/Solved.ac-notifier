@@ -21,6 +21,66 @@ export interface LocalSolvedProblem {
   solvedAcUrl?: string;
 }
 
+export interface RatingProblem {
+  problemId: number | string;
+  title?: string;
+  level: number;
+  tierName?: string;
+  tags?: string[];
+  solvedAt?: string;
+  isSolved?: boolean;
+  isExtra?: boolean;
+  isUnrated?: boolean;
+}
+
+export interface ClassProgress {
+  classLevel: number;
+  requiredSolvedCount: number;
+  solvedCount: number;
+  totalProblems: number;
+  essentialProblems: number;
+  achieved: boolean;
+}
+
+export interface RatingBreakdown {
+  topProblemScore: number;
+  classBonus: number;
+  solvedCountBonus: number;
+  contributionBonus: number;
+  total: number;
+  solvedCountForRating: number;
+  topProblems: RatingProblem[];
+  localClassLevel: number;
+  classStatus?: string;
+  classProgress?: ClassProgress[];
+}
+
+export interface TagRatingBreakdown {
+  tag: string;
+  rating: number;
+  topProblemScore: number;
+  solvedCountBonus: number;
+  solvedCount: number;
+  topProblems: RatingProblem[];
+}
+
+export interface LocalRatingResult {
+  acRating: RatingBreakdown;
+  tagRatings: TagRatingBreakdown[];
+}
+
+export interface ClassProblemGroup {
+  classLevel: number;
+  requiredSolvedCount: number;
+  totalProblems: number;
+  essentialProblems: number;
+  problems: Array<{
+    problemId: number | string;
+    title?: string;
+    isEssential?: boolean;
+  }>;
+}
+
 export interface DashboardStats {
   totalSolved: number;
   currentStreak: number;
@@ -37,9 +97,8 @@ export interface DashboardStats {
     tag: string;
     count: number;
     percent?: number;
-    rating?: number;
-    rank?: number;
   }>;
+  localRating?: LocalRatingResult;
   recentProblems: LocalSolvedProblem[];
   dailySolvedTrend?: Array<{
     date: string;

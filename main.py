@@ -14,6 +14,8 @@ from fastapi.responses import StreamingResponse
 from src.api_client import SolvedAcClient
 from src.recommender import stream_chat_response
 from src.database import DatabaseManager
+from src.services.rating.class_fetcher import get_or_fetch_class_problem_groups
+from src.services.rating.formulas import calculate_local_ac_rating, calculate_tag_ratings
 
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -128,22 +130,6 @@ def parse_tags(value: Any) -> List[str]:
         return []
     return [str(tag) for tag in parsed if str(tag).strip()]
 
-def get_tag_score(level: Optional[int]) -> float:
-    if not level or level <= 0:
-        return 6.0
-    return 12.0 + (level * 3.0) + (level ** 1.45)
-
-def get_tag_rank(rating: int) -> int:
-    if rating >= 700:
-        return 1
-    if rating >= 550:
-        return 2
-    if rating >= 420:
-        return 3
-    if rating >= 300:
-        return 4
-    return 5
-
 def build_empty_dashboard_stats() -> Dict[str, Any]:
     return {
         "totalSolved": 0,
@@ -154,6 +140,10 @@ def build_empty_dashboard_stats() -> Dict[str, Any]:
         "averageLevel": None,
         "difficultyDistribution": [{"tier": label, "level": level, "count": 0} for level, label in DASHBOARD_LEVELS],
         "tagDistribution": [],
+        "localRating": {
+            "acRating": calculate_local_ac_rating({"problems": [], "classProblemGroups": []}),
+            "tagRatings": [],
+        },
         "recentProblems": [],
         "dailySolvedTrend": [],
     }
@@ -184,7 +174,7 @@ def calculate_streaks(solved_dates: List[date], today: date) -> Tuple[int, int]:
         cursor -= timedelta(days=1)
     return current_streak, longest
 
-def get_local_dashboard_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
+def get_local_dashboard_stats(conn: sqlite3.Connection, class_problem_groups: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     stats = build_empty_dashboard_stats()
     today = date.today()
     cursor = conn.execute("""
@@ -202,9 +192,9 @@ def get_local_dashboard_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
     levels: List[int] = []
     difficulty_counts = Counter({label: 0 for _, label in DASHBOARD_LEVELS})
     tag_counts: Counter[str] = Counter()
-    tag_scores: Counter[str] = Counter()
     day_counts: Counter[str] = Counter()
     recent_problems = []
+    rating_problems = []
 
     for row in rows:
         problem_id = row["problem_id"]
@@ -223,7 +213,18 @@ def get_local_dashboard_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
         difficulty_counts[get_short_tier_name(level)] += 1
         for tag in tags or ["태그 없음"]:
             tag_counts[tag] += 1
-            tag_scores[tag] += get_tag_score(level)
+
+        rating_problems.append({
+            "problemId": problem_id,
+            "title": title,
+            "level": level,
+            "tierName": get_tier_name(level),
+            "tags": tags,
+            "solvedAt": solved_at,
+            "isSolved": True,
+            "isExtra": False,
+            "isUnrated": not (isinstance(level, int) and 1 <= level <= 30),
+        })
 
         if len(recent_problems) < 10:
             recent_problems.append({
@@ -250,17 +251,22 @@ def get_local_dashboard_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
         for level, label in DASHBOARD_LEVELS
     ]
     top_tags = tag_counts.most_common(10)
-    max_tag_score = max((tag_scores[tag] for tag, _ in top_tags), default=0)
     stats["tagDistribution"] = [
         {
             "tag": tag,
             "count": count,
             "percent": round((count / len(rows)) * 100, 1) if rows else 0,
-            "rating": min(800, round((tag_scores[tag] / max_tag_score) * 800)) if max_tag_score else 0,
-            "rank": get_tag_rank(min(800, round((tag_scores[tag] / max_tag_score) * 800)) if max_tag_score else 0),
         }
         for tag, count in top_tags
     ]
+    stats["localRating"] = {
+        "acRating": calculate_local_ac_rating({
+            "problems": rating_problems,
+            "classProblemGroups": class_problem_groups or [],
+            "contributionCount": 0,
+        }),
+        "tagRatings": calculate_tag_ratings(rating_problems)[:10],
+    }
     stats["recentProblems"] = recent_problems
     stats["dailySolvedTrend"] = [
         {
@@ -509,7 +515,10 @@ async def get_dashboard(handle: str = DEFAULT_SOLVED_AC_HANDLE):
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         ensure_profile_snapshot_table(conn)
-        stats = get_local_dashboard_stats(conn)
+        class_problem_groups = get_or_fetch_class_problem_groups()
+        stats = get_local_dashboard_stats(conn, class_problem_groups)
+        if stats["localRating"]["acRating"].get("classStatus") == "CLASS 데이터 미연동":
+            warnings.append("CLASS 문제 캐시가 없어 Local CLASS 보너스를 0점으로 계산했습니다.")
 
         profile = get_cached_profile_snapshot(conn, handle)
         if not profile:

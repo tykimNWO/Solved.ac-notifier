@@ -1,11 +1,12 @@
-import { ExternalLink } from 'lucide-react';
+import { FileCode2 } from 'lucide-react';
 import type { LocalSolvedProblem } from '../../types/dashboard';
 
 interface RecentSolvedListProps {
   problems: LocalSolvedProblem[];
+  onOpenProblem: (problemId: number | string) => void;
 }
 
-export function RecentSolvedList({ problems }: RecentSolvedListProps) {
+export function RecentSolvedList({ problems, onOpenProblem }: RecentSolvedListProps) {
   return (
     <div className="rounded-2xl border border-gray-800 bg-[#1E1F20] p-5">
       <div className="mb-4">
@@ -37,17 +38,14 @@ export function RecentSolvedList({ problems }: RecentSolvedListProps) {
                   </div>
                 )}
               </div>
-              {problem.bojUrl && (
-                <a
-                  href={problem.bojUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-gray-300 hover:bg-white/5"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  BOJ
-                </a>
-              )}
+              <button
+                type="button"
+                onClick={() => onOpenProblem(problem.problemId)}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-gray-300 hover:bg-white/5"
+              >
+                <FileCode2 className="h-4 w-4" />
+                문제 열기
+              </button>
             </div>
           ))}
         </div>

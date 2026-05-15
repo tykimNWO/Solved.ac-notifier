@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { Send, Sparkles, Brain, Code2, MessageSquare, FileCode2, Search, Code, Notebook, CheckCircle2, Clock3, ListChecks, Loader2, AlertCircle, ExternalLink, Circle, LayoutDashboard } from 'lucide-react';
 import CodeMirror from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
@@ -10,6 +10,7 @@ const API_BASE_URL = 'http://localhost:8000/api';
 
 type RecommendationStatus = 'idle' | 'loading' | 'reasoning' | 'success' | 'error';
 type RecommendationStepStatus = 'pending' | 'running' | 'completed' | 'error';
+type AppTab = 'dashboard' | 'chat' | 'problem' | 'editor' | 'memo';
 
 interface RecommendationStep {
   id: string;
@@ -264,7 +265,7 @@ function App() {
   const [recommendationError, setRecommendationError] = useState('');
   const [isProcessOpen, setIsProcessOpen] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'chat' | 'problem' | 'editor' | 'memo'>('chat');
+  const [activeTab, setActiveTab] = useState<AppTab>('chat');
   const [searchProblemId, setSearchProblemId] = useState('');
   const [problemData, setProblemData] = useState<ProblemData | null>(null);
   const [userCode, setUserCode] = useState('# 여기에 파이썬 코드를 작성하세요\n\nimport sys\n\ndef solution():\n    # input = sys.stdin.readline\n    pass\n\nif __name__ == "__main__":\n    solution()');
@@ -274,7 +275,35 @@ function App() {
   // 메모 전용 상태
   const [memo, setMemo] = useState('');
   const [isSavingMemo, setIsSavingMemo] = useState(false);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const dashboardScrollTopRef = useRef(0);
+  const pendingMainScrollTopRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const rememberDashboardScroll = () => {
+    if (activeTab === 'dashboard' && contentScrollRef.current) {
+      dashboardScrollTopRef.current = contentScrollRef.current.scrollTop;
+    }
+  };
+
+  const switchTab = (nextTab: AppTab, scrollTop?: number) => {
+    if (activeTab === 'dashboard' && nextTab !== 'dashboard') {
+      rememberDashboardScroll();
+    }
+    if (nextTab === 'dashboard') {
+      pendingMainScrollTopRef.current = dashboardScrollTopRef.current;
+    } else if (scrollTop !== undefined) {
+      pendingMainScrollTopRef.current = scrollTop;
+    }
+    setActiveTab(nextTab);
+  };
+
+  const restoreDashboardScroll = useCallback(() => {
+    const targetScrollTop = dashboardScrollTopRef.current;
+    window.requestAnimationFrame(() => {
+      contentScrollRef.current?.scrollTo({ top: targetScrollTop, behavior: 'auto' });
+    });
+  }, []);
 
   // 1. 초기 로딩 시 DB에서 히스토리 가져오기
   useEffect(() => {
@@ -318,6 +347,15 @@ function App() {
       }
     };
   }, []);
+
+  useLayoutEffect(() => {
+    if (pendingMainScrollTopRef.current === null || !contentScrollRef.current) return;
+    const targetScrollTop = pendingMainScrollTopRef.current;
+    pendingMainScrollTopRef.current = null;
+    window.requestAnimationFrame(() => {
+      contentScrollRef.current?.scrollTo({ top: targetScrollTop, behavior: 'auto' });
+    });
+  }, [activeTab]);
 
   const startRecommendationTimer = () => {
     recommendationStartRef.current = Date.now();
@@ -546,8 +584,13 @@ function App() {
 
   const openProblem = (problem: RecommendedProblem) => {
     const problemId = String(problem.problemId);
-    setActiveTab('problem');
+    switchTab('problem', 0);
     loadProblem(problemId);
+  };
+
+  const openProblemById = (problemId: number | string) => {
+    switchTab('problem', 0);
+    loadProblem(String(problemId));
   };
 
   const handleJudge = async () => {
@@ -721,10 +764,10 @@ function App() {
 
   return (
     <div className="h-[100dvh] flex flex-col bg-[#131314] text-gray-100 font-sans overflow-hidden">
-      <div className="flex-1 overflow-y-auto custom-scrollbar pb-24">
+      <div ref={contentScrollRef} className="flex-1 overflow-y-auto custom-scrollbar pb-24">
         {/* Tab 0: 코딩 대시보드 */}
         {activeTab === 'dashboard' && (
-          <Dashboard />
+          <Dashboard onOpenProblem={openProblemById} onReady={restoreDashboardScroll} />
         )}
         
         {/* Tab 1: AI 채팅 */}
@@ -992,11 +1035,11 @@ function App() {
             </div>
           )}
           <div className="flex gap-1">
-            <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'dashboard' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'dashboard' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<LayoutDashboard className="w-5 h-5 relative z-10" /></button>
-            <button onClick={() => setActiveTab('chat')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'chat' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'chat' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<MessageSquare className="w-5 h-5 relative z-10" /></button>
-            <button onClick={() => setActiveTab('problem')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'problem' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'problem' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<FileCode2 className="w-5 h-5 relative z-10" /></button>
-            <button onClick={() => setActiveTab('editor')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'editor' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'editor' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<Code className="w-5 h-5 relative z-10" /></button>
-            <button onClick={() => setActiveTab('memo')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'memo' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'memo' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<Notebook className="w-5 h-5 relative z-10" /></button>
+            <button onClick={() => switchTab('dashboard')} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'dashboard' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'dashboard' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<LayoutDashboard className="w-5 h-5 relative z-10" /></button>
+            <button onClick={() => switchTab('chat', 0)} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'chat' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'chat' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<MessageSquare className="w-5 h-5 relative z-10" /></button>
+            <button onClick={() => switchTab('problem', 0)} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'problem' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'problem' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<FileCode2 className="w-5 h-5 relative z-10" /></button>
+            <button onClick={() => switchTab('editor', 0)} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'editor' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'editor' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<Code className="w-5 h-5 relative z-10" /></button>
+            <button onClick={() => switchTab('memo', 0)} className={`p-3 rounded-2xl relative transition-all ${activeTab === 'memo' ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}>{activeTab === 'memo' && <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-purple-600/20 rounded-2xl animate-pulse" />}<Notebook className="w-5 h-5 relative z-10" /></button>
           </div>
         </div>
       </div>

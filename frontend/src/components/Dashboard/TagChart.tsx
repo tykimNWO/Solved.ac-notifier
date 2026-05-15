@@ -1,14 +1,11 @@
 import { Tag } from 'lucide-react';
 import { PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, ResponsiveContainer, Tooltip } from 'recharts';
-import type { DashboardStats } from '../../types/dashboard';
+import type { TagRatingBreakdown } from '../../types/dashboard';
 
 interface TagChartProps {
-  data: DashboardStats['tagDistribution'];
+  data?: TagRatingBreakdown[];
   totalSolved: number;
 }
-
-const formatPercent = (value?: number) =>
-  typeof value === 'number' ? `${value.toFixed(1)}%` : '0.0%';
 
 const formatRating = (value?: number) =>
   typeof value === 'number' ? value.toLocaleString() : '0';
@@ -16,11 +13,12 @@ const formatRating = (value?: number) =>
 const getDisplayTag = (tagName: string) => `#${tagName}`;
 
 export function TagChart({ data, totalSolved }: TagChartProps) {
-  const hasData = data.some((item) => item.count > 0);
-  const chartData = data.map((item) => ({
+  const tagRatings = data || [];
+  const hasData = tagRatings.some((item) => item.rating > 0);
+  const maxRating = Math.max(800, ...tagRatings.map((item) => item.rating));
+  const chartData = tagRatings.map((item) => ({
     ...item,
     displayTag: item.tag.replace(/_/g, '_'),
-    rating: item.rating || 0,
   }));
 
   return (
@@ -37,9 +35,9 @@ export function TagChart({ data, totalSolved }: TagChartProps) {
               <RadarChart data={chartData} outerRadius="74%">
                 <PolarGrid gridType="polygon" stroke="#334155" strokeDasharray="6 6" />
                 <PolarAngleAxis dataKey="displayTag" tick={{ fill: '#e5e7eb', fontSize: 12 }} />
-                <PolarRadiusAxis angle={90} domain={[0, 800]} tick={{ fill: '#9ca3af', fontSize: 11 }} stroke="#334155" />
+                <PolarRadiusAxis angle={90} domain={[0, maxRating]} tick={{ fill: '#9ca3af', fontSize: 11 }} stroke="#334155" />
                 <Radar
-                  name="레이팅"
+                  name="Local Tag Rating"
                   dataKey="rating"
                   stroke="#f0a500"
                   fill="#f0a500"
@@ -56,31 +54,36 @@ export function TagChart({ data, totalSolved }: TagChartProps) {
             </ResponsiveContainer>
           </div>
 
-          <div className="min-w-0 overflow-hidden">
-            <div className="grid grid-cols-[minmax(160px,1fr)_86px_106px] border-b border-white/10 px-3 pb-3 text-xs font-semibold text-gray-300">
+          <div className="min-w-0 overflow-x-auto custom-scrollbar">
+            <div className="min-w-[620px]">
+            <div className="grid grid-cols-[minmax(150px,1fr)_76px_104px_104px_104px] border-b border-white/10 px-3 pb-3 text-xs font-semibold text-gray-300">
               <div>태그</div>
               <div className="text-right">문제</div>
+              <div className="text-right">Top 50</div>
+              <div className="text-right">보너스</div>
               <div className="text-right">레이팅</div>
             </div>
             <div className="max-h-[420px] overflow-y-auto custom-scrollbar">
-              {data.map((item) => (
-                <div key={item.tag} className="grid grid-cols-[minmax(160px,1fr)_86px_106px] border-b border-white/10 px-3 py-3 text-sm">
+              {tagRatings.map((item) => (
+                <div key={item.tag} className="grid grid-cols-[minmax(150px,1fr)_76px_104px_104px_104px] border-b border-white/10 px-3 py-3 text-sm">
                   <div className="truncate pr-3 text-gray-100">{getDisplayTag(item.tag)}</div>
                   <div className="text-right">
-                    <span className="font-semibold text-gray-100">{item.count.toLocaleString()}</span>
-                    <span className="ml-3 text-gray-400">{formatPercent(item.percent)}</span>
+                    <span className="font-semibold text-gray-100">{item.solvedCount.toLocaleString()}</span>
                   </div>
+                  <div className="text-right font-semibold text-gray-300">{formatRating(item.topProblemScore)}</div>
+                  <div className="text-right font-semibold text-gray-300">{formatRating(item.solvedCountBonus)}</div>
                   <div className="flex items-center justify-end gap-2 font-bold text-[#55799b]">
                     <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-[#55799b]/80 px-1 text-[11px] text-white">
-                      {item.rank || 5}
+                      L
                     </span>
                     {formatRating(item.rating)}
                   </div>
                 </div>
               ))}
             </div>
+            </div>
             <p className="mt-4 text-xs leading-relaxed text-gray-500">
-              레이팅은 로컬 solved 로그의 풀이 수와 난이도 가중치를 800점 스케일로 정규화한 대시보드용 지표입니다.
+              레이팅은 태그 내 상위 50문제 level 합 * 2와 해결 수 보너스를 더한 Local Tag Rating입니다.
               총 {totalSolved.toLocaleString()}문제 기준으로 계산했습니다.
             </p>
           </div>
