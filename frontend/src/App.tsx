@@ -11,6 +11,17 @@ const API_BASE_URL = 'http://localhost:8000/api';
 type RecommendationStatus = 'idle' | 'loading' | 'reasoning' | 'success' | 'error';
 type RecommendationStepStatus = 'pending' | 'running' | 'completed' | 'error';
 type AppTab = 'dashboard' | 'chat' | 'problem' | 'editor' | 'memo';
+type JudgeMode = 'basic' | 'analysis';
+type JudgeVerdict =
+  | 'Basic Passed'
+  | 'Sample Failed'
+  | 'Analysis Passed'
+  | 'Counterexample Found'
+  | 'Reference Unavailable'
+  | 'Reference Error'
+  | 'Needs Review';
+type ReferenceConfidence = 'high' | 'medium' | 'low';
+type HintLevel = 'level_1' | 'level_2' | 'level_3' | 'level_4';
 
 interface RecommendationStep {
   id: string;
@@ -54,17 +65,56 @@ interface ProblemData {
 
 interface JudgeResult {
   case: number;
+  name?: string;
+  input?: string;
   result: string;
   time?: string;
   error?: string;
   actual?: string;
   expected?: string;
+  reason?: string;
+  runtime_error?: Record<string, unknown>;
+}
+
+interface FirstFailedCase {
+  name: string;
+  input: string;
+  expected: string;
+  actual: string;
+  reason?: string;
+  runtime_error?: Record<string, unknown>;
+}
+
+interface ReferenceStatus {
+  available: boolean;
+  confidence?: ReferenceConfidence | null;
+  warnings: string[];
+  cache_hit?: boolean;
 }
 
 interface JudgeResponse {
   status: string;
-  results?: JudgeResult[];
-  is_solved?: boolean;
+  mode?: JudgeMode;
+  problem_id?: number;
+  verdict?: JudgeVerdict;
+  sample_passed?: boolean;
+  generated_test_count?: number;
+  failed_test_count?: number;
+  first_failed_case?: FirstFailedCase | null;
+  reference?: ReferenceStatus;
+  results: JudgeResult[];
+  message?: string;
+  warnings?: string[];
+  disclaimer?: string;
+  is_solved: boolean;
+  detail?: string;
+}
+
+interface HintResponse {
+  status: string;
+  hint_level: HintLevel;
+  hint: string;
+  disclaimer: string;
   detail?: string;
 }
 
@@ -269,8 +319,12 @@ function App() {
   const [searchProblemId, setSearchProblemId] = useState('');
   const [problemData, setProblemData] = useState<ProblemData | null>(null);
   const [userCode, setUserCode] = useState('# 여기에 파이썬 코드를 작성하세요\n\nimport sys\n\ndef solution():\n    # input = sys.stdin.readline\n    pass\n\nif __name__ == "__main__":\n    solution()');
-  const [judgeResults, setJudgeResults] = useState<JudgeResult[] | null>(null);
-  const [judgeSolved, setJudgeSolved] = useState(false);
+  const [judgeMode, setJudgeMode] = useState<JudgeMode>('basic');
+  const [judgeResponse, setJudgeResponse] = useState<JudgeResponse | null>(null);
+  const [hintSheetOpen, setHintSheetOpen] = useState(false);
+  const [hintText, setHintText] = useState('');
+  const [hintLevel, setHintLevel] = useState<HintLevel | null>(null);
+  const [isHintLoading, setIsHintLoading] = useState(false);
   
   // 메모 전용 상태
   const [memo, setMemo] = useState('');
@@ -596,21 +650,54 @@ function App() {
   const handleJudge = async () => {
     if (!searchProblemId || isLoading) return;
     setIsLoading(true);
-    setJudgeResults(null);
-    setJudgeSolved(false);
+    setJudgeResponse(null);
+    setHintSheetOpen(false);
+    setHintText('');
+    setHintLevel(null);
     try {
       const res = await fetch(`${API_BASE_URL}/judge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem_id: parseInt(searchProblemId), code: userCode }),
+        body: JSON.stringify({ problem_id: parseInt(searchProblemId), code: userCode, mode: judgeMode }),
       });
       const response: JudgeResponse = await res.json();
       if (response.status === 'success') {
-        setJudgeResults(response.results || []);
-        setJudgeSolved(Boolean(response.is_solved));
+        setJudgeResponse({ ...response, results: response.results || [], is_solved: Boolean(response.is_solved) });
+        if (response.verdict === 'Counterexample Found') {
+          setHintSheetOpen(true);
+        }
       }
-      else alert(response.detail || "채점 중 오류 발생");
+      else alert(response.detail || "검증 중 오류 발생");
     } catch { alert("서버 연결 실패"); } finally { setIsLoading(false); }
+  };
+
+  const requestJudgeHint = async (level: HintLevel) => {
+    if (!judgeResponse?.first_failed_case || !searchProblemId) return;
+    setHintLevel(level);
+    setHintText('');
+    setIsHintLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/judge/hint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          problem_id: parseInt(searchProblemId),
+          code: userCode,
+          failed_case: judgeResponse.first_failed_case,
+          hint_level: level,
+        }),
+      });
+      const response: HintResponse = await res.json();
+      if (response.status === 'success') {
+        setHintText(response.hint);
+      } else {
+        setHintText(response.detail || '힌트를 생성하지 못했습니다. 실패 케이스의 입력 흐름을 먼저 천천히 따라가 보시면 좋겠습니다.');
+      }
+    } catch {
+      setHintText('서버 연결 문제로 힌트를 가져오지 못했습니다. 잠시 뒤 다시 시도해주세요.');
+    } finally {
+      setIsHintLoading(false);
+    }
   };
 
   const handleSaveMemo = async () => {
@@ -624,6 +711,39 @@ function App() {
       });
       alert("학습 내용이 저장되었습니다.");
     } catch { alert("메모 저장 실패"); } finally { setIsSavingMemo(false); }
+  };
+
+  const getVerdictTone = (verdict?: JudgeVerdict) => {
+    if (verdict === 'Basic Passed' || verdict === 'Analysis Passed') {
+      return 'border-green-500/30 bg-green-500/10 text-green-300';
+    }
+    if (verdict === 'Counterexample Found') {
+      return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+    }
+    if (verdict === 'Needs Review' || verdict === 'Reference Unavailable' || verdict === 'Reference Error') {
+      return 'border-blue-500/30 bg-blue-500/10 text-blue-200';
+    }
+    return 'border-red-500/30 bg-red-500/10 text-red-300';
+  };
+
+  const getVerdictMessage = (verdict?: JudgeVerdict) => {
+    const labels: Record<JudgeVerdict, string> = {
+      'Basic Passed': '예제 기준 통과',
+      'Sample Failed': '예제 테스트에서 차이 발생',
+      'Analysis Passed': '분석 기준 통과',
+      'Counterexample Found': '추가 테스트에서 반례 발견',
+      'Reference Unavailable': 'reference 확보 실패',
+      'Reference Error': 'reference 검증 실패',
+      'Needs Review': '검토 필요',
+    };
+    return verdict ? labels[verdict] : '검증 결과';
+  };
+
+  const isNeedsReviewWarning = (response: JudgeResponse | null) => {
+    if (!response) return false;
+    return response.verdict === 'Needs Review'
+      || response.reference?.confidence === 'low'
+      || Boolean(response.warnings?.some((warning) => warning.includes('Needs Review') || warning.includes('신뢰도')));
   };
 
   const renderStepIcon = (status: RecommendationStepStatus) => {
@@ -939,11 +1059,32 @@ function App() {
         {/* Tab 3: 코드 에디터 */}
         {activeTab === 'editor' && (
           <div className="p-6 space-y-4 h-full flex flex-col">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 inline-block">코드 에디터</h3>
-              <button onClick={handleJudge} disabled={isLoading} className="px-4 py-2 bg-gradient-to-r from-blue-500 via-purple-500 to-purple-600 rounded-xl text-xs font-bold hover:opacity-90 transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50 text-white">
-                {isLoading ? '채점 중...' : '코드 채점하기'}
-              </button>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 inline-block">코드 에디터</h3>
+                <p className="mt-1 text-xs text-gray-500">Python 제출 코드만 지원합니다.</p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="rounded-2xl border border-white/10 bg-[#1E1F20] p-1.5">
+                  {(['basic', 'analysis'] as JudgeMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setJudgeMode(mode)}
+                      className={`rounded-xl px-3 py-2 text-xs font-semibold transition-all ${judgeMode === mode ? 'bg-blue-500/20 text-blue-200 shadow-inner' : 'text-gray-500 hover:text-gray-300'}`}
+                    >
+                      {mode === 'basic' ? '기본 모드' : '분석 모드'}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={handleJudge} disabled={isLoading} className="px-4 py-2 bg-gradient-to-r from-blue-500 via-purple-500 to-purple-600 rounded-xl text-xs font-bold hover:opacity-90 transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50 text-white">
+                  {isLoading ? '검증 중...' : '코드 검증하기'}
+                </button>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-[#1E1F20]/80 p-4 text-xs text-gray-400">
+              {judgeMode === 'basic'
+                ? '예제 입출력만 빠르게 확인합니다. Gemini API를 호출하지 않습니다.'
+                : 'Gemini가 추가 테스트와 reference solution을 활용해 더 까다롭게 확인합니다. BOJ 공식 채점은 아니며 참고용입니다.'}
             </div>
             <div className="flex-1 bg-[#1E1F20] rounded-2xl border border-gray-800 overflow-hidden font-mono shadow-inner min-h-[400px]">
               <CodeMirror
@@ -977,21 +1118,105 @@ function App() {
                 }}
               />
             </div>
-            {judgeResults && (
-              <div className="mt-4 space-y-2">
-                {judgeSolved && (
-                  <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-xs font-semibold text-green-300">
-                    모든 예제 채점에 성공해 solved 로그에 기록했습니다. 대시보드를 다시 열면 최신 통계에 반영됩니다.
-                  </div>
-                )}
-                {judgeResults.map((res, idx) => (
-                  <div key={idx} className={`p-4 rounded-xl border ${res.result === 'Success' ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-                    <div className="flex justify-between items-center text-xs font-bold">
-                      <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">케이스 #{res.case}</span>
-                      <span className={res.result === 'Success' ? 'text-green-400' : 'text-red-400'}>{res.result === 'Success' ? '✅ 맞았습니다' : '❌ ' + res.result}</span>
+            {judgeResponse && (
+              <div className="mt-4 space-y-3">
+                <div className={`rounded-2xl border p-4 ${getVerdictTone(judgeResponse.verdict)}`}>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2 text-sm font-bold">
+                        <span>{judgeResponse.verdict}</span>
+                        {isNeedsReviewWarning(judgeResponse) && (
+                          <span className="rounded-full border border-blue-400/30 bg-blue-400/10 px-2 py-0.5 text-[10px] text-blue-200">Needs Review</span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed">{judgeResponse.message || getVerdictMessage(judgeResponse.verdict)}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px] md:min-w-[260px]">
+                      <div className="rounded-xl bg-black/20 p-2">
+                        <div className="text-gray-500">예제</div>
+                        <div className="font-semibold">{judgeResponse.sample_passed ? '통과' : '확인 필요'}</div>
+                      </div>
+                      <div className="rounded-xl bg-black/20 p-2">
+                        <div className="text-gray-500">추가 테스트</div>
+                        <div className="font-semibold">{judgeResponse.generated_test_count || 0}개</div>
+                      </div>
+                      <div className="rounded-xl bg-black/20 p-2">
+                        <div className="text-gray-500">실패</div>
+                        <div className="font-semibold">{judgeResponse.failed_test_count || 0}개</div>
+                      </div>
+                      <div className="rounded-xl bg-black/20 p-2">
+                        <div className="text-gray-500">reference</div>
+                        <div className="font-semibold">{judgeResponse.reference?.confidence || (judgeResponse.reference?.available ? 'ready' : 'none')}</div>
+                      </div>
                     </div>
                   </div>
-                ))}
+                  {judgeResponse.is_solved && (
+                    <p className="mt-3 rounded-xl border border-green-400/20 bg-green-400/10 p-3 text-xs text-green-200">
+                      통과 계열 결과로 solved 로그에 기록했습니다. 대시보드를 다시 열면 최신 통계에 반영됩니다.
+                    </p>
+                  )}
+                  {judgeResponse.disclaimer && judgeResponse.mode === 'analysis' && (
+                    <p className="mt-3 text-[11px] leading-relaxed text-gray-400">{judgeResponse.disclaimer}</p>
+                  )}
+                </div>
+
+                {judgeResponse.first_failed_case && (
+                  <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-amber-200">첫 번째 실패 케이스: {judgeResponse.first_failed_case.name}</div>
+                        {judgeResponse.first_failed_case.reason && (
+                          <p className="mt-1 text-xs text-amber-100/70">{judgeResponse.first_failed_case.reason}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setHintSheetOpen(true)}
+                        className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-400/15"
+                      >
+                        힌트 보기
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {judgeResponse.warnings && judgeResponse.warnings.length > 0 && (
+                  <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+                    <div className="mb-2 flex items-center gap-2 text-xs font-bold text-blue-200">
+                      <AlertCircle className="h-4 w-4" /> 확인할 점
+                    </div>
+                    <div className="space-y-1 text-xs leading-relaxed text-blue-100/80">
+                      {judgeResponse.warnings.map((warning, idx) => <p key={idx}>{warning}</p>)}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {judgeResponse.results.map((res, idx) => (
+                    <div key={`${res.case}-${idx}`} className={`p-4 rounded-xl border ${res.result === 'Success' ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs font-bold">
+                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">{res.name || `케이스 #${res.case}`}</span>
+                        <span className={res.result === 'Success' ? 'text-green-400' : 'text-red-300'}>{res.result === 'Success' ? '검증 통과' : res.result}</span>
+                      </div>
+                      {res.reason && <p className="mt-2 text-xs text-gray-500">{res.reason}</p>}
+                      {res.result !== 'Success' && (
+                        <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] md:grid-cols-2">
+                          {res.expected !== undefined && (
+                            <div className="rounded-lg bg-black/20 p-2">
+                              <div className="mb-1 text-gray-500">expected</div>
+                              <pre className="whitespace-pre-wrap text-gray-300">{res.expected}</pre>
+                            </div>
+                          )}
+                          {res.actual !== undefined && (
+                            <div className="rounded-lg bg-black/20 p-2">
+                              <div className="mb-1 text-gray-500">actual</div>
+                              <pre className="whitespace-pre-wrap text-gray-300">{res.actual}</pre>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1024,6 +1249,51 @@ function App() {
           </div>
         )}
       </div>
+
+      {hintSheetOpen && judgeResponse?.first_failed_case && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 px-4 pb-4 backdrop-blur-sm md:items-center md:pb-0">
+          <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#1E1F20] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-sm font-bold text-gray-100">추가 테스트에서 다른 결과가 나왔어요</div>
+                <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                  예제는 통과했지만, 분석 모드에서 생성한 테스트 중 하나에서 예상 출력과 다른 결과가 나왔습니다. 어느 정도의 힌트를 보고 싶으신가요?
+                </p>
+              </div>
+              <button onClick={() => setHintSheetOpen(false)} className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-gray-400 hover:bg-white/5">
+                닫기
+              </button>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {([
+                ['level_1', '살짝만 힌트'],
+                ['level_2', '반례 유형 보기'],
+                ['level_3', '코드 의심 지점 보기'],
+                ['level_4', '접근법에 가까운 힌트 보기'],
+              ] as [HintLevel, string][]).map(([level, label]) => (
+                <button
+                  key={level}
+                  onClick={() => requestJudgeHint(level)}
+                  disabled={isHintLoading}
+                  className={`rounded-2xl border px-4 py-3 text-left text-xs font-semibold transition-all disabled:opacity-50 ${hintLevel === level ? 'border-blue-400/40 bg-blue-400/10 text-blue-100' : 'border-white/10 bg-black/20 text-gray-300 hover:bg-white/5'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {(isHintLoading || hintText) && (
+              <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+                <div className="mb-2 flex items-center gap-2 text-xs font-bold text-blue-200">
+                  <Brain className="h-4 w-4" /> 이런 점을 생각해봐요
+                </div>
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-gray-300">
+                  {isHintLoading ? '힌트를 준비하고 있습니다...' : hintText}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 플로팅 하단 바 */}
       <div className="fixed bottom-6 left-0 right-0 px-6 pointer-events-none flex justify-center">

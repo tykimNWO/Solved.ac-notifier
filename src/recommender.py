@@ -19,7 +19,7 @@ CHROMA_DB_PATH = os.path.join(BASE_DIR, 'data', 'chroma_db')
 chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 collection = chroma_client.get_or_create_collection(name="boj_problems")
 
-GEMINI_MODEL_ID = os.environ.get("GEMINI_MODEL_ID", "gemini-3.1-flash-lite-preview")
+GEMINI_MODEL_ID = os.environ.get("GEMINI_MODEL_ID", "gemini-3.1-flash-lite")
 EMBEDDING_MODEL_ID = "gemini-embedding-001"
 RECOMMENDATION_RESULT_START = "[RECOMMENDATION_RESULT]"
 RECOMMENDATION_RESULT_END = "[/RECOMMENDATION_RESULT]"

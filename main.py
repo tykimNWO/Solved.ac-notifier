@@ -1,9 +1,6 @@
 import os
 import json
-import time
 import sqlite3
-import subprocess
-import tempfile
 from collections import Counter
 from datetime import date, datetime, timedelta
 from fastapi import FastAPI, HTTPException
@@ -14,6 +11,9 @@ from fastapi.responses import StreamingResponse
 from src.api_client import SolvedAcClient
 from src.recommender import stream_chat_response
 from src.database import DatabaseManager
+from src.judge.aggregator import JudgeResultAggregator
+from src.judge.gemini_hint import GeminiHintGenerator
+from src.judge.types import HintRequestModel, HintResponseModel, JudgeMode
 from src.services.rating.class_fetcher import get_or_fetch_class_problem_groups
 from src.services.rating.formulas import calculate_local_ac_rating, calculate_tag_ratings
 
@@ -22,8 +22,11 @@ from typing import Any, Dict, List, Optional, Tuple
 # 💡 DB 경로 설정 (에러 방지를 위한 절대 경로)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'data', 'tracker.db')
+DATA_DIR = os.path.join(BASE_DIR, 'data')
 DEFAULT_SOLVED_AC_HANDLE = "tykim0710"
 db = DatabaseManager(DB_PATH)
+judge_aggregator = JudgeResultAggregator(DB_PATH, DATA_DIR, db)
+hint_generator = GeminiHintGenerator()
 
 # FastAPI 앱 생성
 app = FastAPI(title="Solved.ac-with-LLMCoach API", description="Solved.ac-with-LLMCoach 백엔드 서버")
@@ -52,6 +55,7 @@ class ChatRequest(BaseModel):
 class JudgeRequest(BaseModel):
     problem_id: int
     code: str
+    mode: JudgeMode = "basic"
 
 DASHBOARD_TIER_GROUPS = ["Bronze", "Silver", "Gold", "Platinum", "Diamond", "Ruby", "Unknown"]
 DASHBOARD_LEVELS = (
@@ -438,60 +442,25 @@ async def get_problem(problem_id: int):
 
 @app.post("/api/judge")
 async def run_judge(req: JudgeRequest):
-    """사용자의 파이썬 코드를 채점하는 API"""
+    """사용자의 파이썬 코드를 기본/분석 모드로 검증하는 API"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT sample_inputs, sample_outputs FROM problem_details WHERE problem_id = ?", (req.problem_id,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        if not row:
-            raise HTTPException(status_code=404, detail="채점 데이터를 찾을 수 없습니다.")
-        
-        sample_inputs = json.loads(row[0])
-        sample_outputs = json.loads(row[1])
-        results = []
-
-        with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode='w', encoding='utf-8') as f:
-            f.write(req.code)
-            temp_code_path = f.name
-
-        for i in range(len(sample_inputs)):
-            start_time = time.time()
-            try:
-                process = subprocess.run(
-                    ["python3", temp_code_path],
-                    input=sample_inputs[i],
-                    capture_output=True,
-                    text=True,
-                    timeout=2.0 
-                )
-                
-                elapsed_time = (time.time() - start_time) * 1000
-                actual_output = process.stdout.strip()
-                expected_output = sample_outputs[i].strip()
-
-                if process.returncode != 0:
-                    res = {"case": i+1, "result": "Runtime Error", "error": process.stderr}
-                elif actual_output == expected_output:
-                    res = {"case": i+1, "result": "Success", "time": f"{elapsed_time:.1f}ms"}
-                else:
-                    res = {"case": i+1, "result": "Wrong Answer", "actual": actual_output, "expected": expected_output}
-                    
-            except subprocess.TimeoutExpired:
-                res = {"case": i+1, "result": "Time Limit Exceeded"}
-            
-            results.append(res)
-
-        os.remove(temp_code_path)
-        is_all_success = len(results) > 0 and all(result["result"] == "Success" for result in results)
-        if is_all_success:
-            db.upsert_user_solve_log(req.problem_id, "solved")
-        return {"status": "success", "results": results, "is_solved": is_all_success}
-
+        return judge_aggregator.run(req.problem_id, req.code, req.mode).model_dump()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/judge/hint")
+async def generate_judge_hint(req: HintRequestModel):
+    """분석 모드 반례에 대해 사용자가 선택한 단계의 코칭 힌트를 생성합니다."""
+    try:
+        problem = judge_aggregator.load_problem(req.problem_id)
+        hint = hint_generator.generate(problem, req.code, req.failed_case, req.hint_level)
+        return HintResponseModel(hint_level=req.hint_level, hint=hint).model_dump()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"힌트 생성에 실패했습니다: {e}")
 
 @app.get("/api/dashboard")
 async def get_dashboard(handle: str = DEFAULT_SOLVED_AC_HANDLE):
