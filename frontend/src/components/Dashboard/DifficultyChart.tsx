@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import type { DashboardStats } from '../../types/dashboard';
 
@@ -27,6 +28,15 @@ const tierTextColors: Record<string, string> = {
 };
 
 const getTierFamily = (tier: string) => tier === 'NR' ? 'NR' : tier.slice(0, 1);
+const tierFamilyLabels: Record<string, string> = {
+  NR: 'Unrated',
+  B: 'Bronze',
+  S: 'Silver',
+  G: 'Gold',
+  P: 'Platinum',
+  D: 'Diamond',
+  R: 'Ruby',
+};
 
 const formatPercent = (count: number, total: number) =>
   total > 0 ? `${((count / total) * 100).toFixed(1)}%` : '0.0%';
@@ -73,8 +83,19 @@ const renderTierLabel = (props: PieLabelProps) => {
 };
 
 export function DifficultyChart({ data, totalSolved }: DifficultyChartProps) {
+  const [isDetailed, setIsDetailed] = useState(false);
   const hasData = data.some((item) => item.count > 0);
-  const chartData = data.filter((item) => item.count > 0);
+  const compactData = Object.values(
+    data.reduce<Record<string, { tier: string; count: number }>>((acc, item) => {
+      const family = getTierFamily(item.tier);
+      if (!acc[family]) {
+        acc[family] = { tier: tierFamilyLabels[family] || item.tier, count: 0 };
+      }
+      acc[family].count += item.count;
+      return acc;
+    }, {})
+  ).filter((item) => item.count > 0);
+  const chartData = isDetailed ? data.filter((item) => item.count > 0) : compactData;
 
   return (
     <div className="rounded-2xl border border-gray-800 bg-[#091216] p-5 lg:col-span-2">
@@ -84,10 +105,20 @@ export function DifficultyChart({ data, totalSolved }: DifficultyChartProps) {
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-gray-500 text-[10px]">△</span>
             난이도 분포
           </div>
+          <p className="mt-1 text-xs text-gray-500">
+            {isDetailed ? '레벨별 상세 분포' : '티어 그룹으로 요약한 간략 분포'}
+          </p>
           <div className="mt-3 text-3xl font-bold text-white">
             {totalSolved.toLocaleString()}<span className="ml-1 text-xl font-semibold text-gray-200">문제 해결</span>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setIsDetailed((value) => !value)}
+          className="inline-flex items-center justify-center rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-gray-300 hover:bg-white/5"
+        >
+          {isDetailed ? '간략 보기' : '상세 보기'}
+        </button>
       </div>
 
       {hasData ? (
@@ -128,12 +159,12 @@ export function DifficultyChart({ data, totalSolved }: DifficultyChartProps) {
 
           <div className="min-w-0 overflow-hidden">
             <div className="grid grid-cols-[1fr_80px_76px] border-b border-white/10 px-3 pb-3 text-xs font-semibold text-gray-300">
-              <div>레벨</div>
+              <div>{isDetailed ? '레벨' : '티어'}</div>
               <div className="text-right">문제</div>
               <div className="text-right">비율</div>
             </div>
             <div className="max-h-[360px] overflow-y-auto custom-scrollbar">
-              {data.map((item) => {
+              {(isDetailed ? data : compactData).map((item) => {
                 const family = getTierFamily(item.tier);
                 return (
                   <div key={item.tier} className="grid grid-cols-[1fr_80px_76px] border-b border-white/10 px-3 py-3 text-sm">

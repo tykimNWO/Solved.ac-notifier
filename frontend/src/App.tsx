@@ -169,6 +169,117 @@ const getTierInfo = (tier?: number | string) => {
 
 const formatElapsed = (ms: number) => `${(ms / 1000).toFixed(1)}초`;
 
+const subscriptMap: Record<string, string> = {
+  '0': '₀',
+  '1': '₁',
+  '2': '₂',
+  '3': '₃',
+  '4': '₄',
+  '5': '₅',
+  '6': '₆',
+  '7': '₇',
+  '8': '₈',
+  '9': '₉',
+  '+': '₊',
+  '-': '₋',
+  '=': '₌',
+  '(': '₍',
+  ')': '₎',
+  a: 'ₐ',
+  e: 'ₑ',
+  h: 'ₕ',
+  i: 'ᵢ',
+  j: 'ⱼ',
+  k: 'ₖ',
+  l: 'ₗ',
+  m: 'ₘ',
+  n: 'ₙ',
+  o: 'ₒ',
+  p: 'ₚ',
+  r: 'ᵣ',
+  s: 'ₛ',
+  t: 'ₜ',
+  u: 'ᵤ',
+  v: 'ᵥ',
+  x: 'ₓ',
+};
+
+const superscriptMap: Record<string, string> = {
+  '0': '⁰',
+  '1': '¹',
+  '2': '²',
+  '3': '³',
+  '4': '⁴',
+  '5': '⁵',
+  '6': '⁶',
+  '7': '⁷',
+  '8': '⁸',
+  '9': '⁹',
+  '+': '⁺',
+  '-': '⁻',
+  '=': '⁼',
+  '(': '⁽',
+  ')': '⁾',
+  i: 'ⁱ',
+  n: 'ⁿ',
+};
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const toScript = (value: string, map: Record<string, string>) =>
+  value
+    .split('')
+    .map((char) => map[char] || char)
+    .join('');
+
+const formatMathExpression = (value: string) => {
+  let math = escapeHtml(value.trim());
+  const replacements: Array<[RegExp, string]> = [
+    [/\\leq/g, '≤'],
+    [/\\le/g, '≤'],
+    [/\\geq/g, '≥'],
+    [/\\ge/g, '≥'],
+    [/\\neq/g, '≠'],
+    [/\\ne/g, '≠'],
+    [/\\lt/g, '&lt;'],
+    [/\\gt/g, '&gt;'],
+    [/\\cdots/g, '⋯'],
+    [/\\ldots/g, '…'],
+    [/\\times/g, '×'],
+    [/\\div/g, '÷'],
+    [/\\pm/g, '±'],
+    [/\\to/g, '→'],
+    [/\\infty/g, '∞'],
+    [/\\sum/g, '∑'],
+  ];
+  replacements.forEach(([pattern, replacement]) => {
+    math = math.replace(pattern, replacement);
+  });
+  math = math
+    .replace(/\\left/g, '')
+    .replace(/\\right/g, '')
+    .replace(/\\,/g, ' ')
+    .replace(/\\ /g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/_\{([^{}]+)\}/g, (_, script: string) => toScript(script, subscriptMap))
+    .replace(/_([A-Za-z0-9+\-=()])/g, (_, script: string) => toScript(script, subscriptMap))
+    .replace(/\^\{([^{}]+)\}/g, (_, script: string) => toScript(script, superscriptMap))
+    .replace(/\^([A-Za-z0-9+\-=()])/g, (_, script: string) => toScript(script, superscriptMap));
+  return `<span class="problem-math">${math}</span>`;
+};
+
+const renderProblemHtml = (html: string) =>
+  (html || '')
+    .replace(/\\\[((?:.|\n)*?)\\\]/g, (_match, expression: string) => formatMathExpression(expression))
+    .replace(/\\\(((?:.|\n)*?)\\\)/g, (_match, expression: string) => formatMathExpression(expression))
+    .replace(/\$([^$\n]+?)\$/g, (_match, expression: string) => formatMathExpression(expression));
+
 const createInitialRecommendationSteps = (): RecommendationStep[] =>
   RECOMMENDATION_STEPS.map((step) => ({ ...step, status: 'pending' }));
 
@@ -1008,16 +1119,16 @@ function App() {
 
                 <div className="space-y-4">
                   <h3 className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 inline-block border-b border-purple-500/30 pb-1">문제 설명</h3>
-                  <div className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: problemData.description }} />
+                  <div className="problem-content prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: renderProblemHtml(problemData.description) }} />
                 </div>
                 <div className="grid grid-cols-1 gap-4">
                   <div className="bg-[#1E1F20] p-5 rounded-2xl border border-gray-800">
                     <h3 className="text-lg font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">입력</h3>
-                    <div className="prose prose-invert" dangerouslySetInnerHTML={{ __html: problemData.input_desc }} />
+                    <div className="problem-content prose prose-invert" dangerouslySetInnerHTML={{ __html: renderProblemHtml(problemData.input_desc) }} />
                   </div>
                   <div className="bg-[#1E1F20] p-5 rounded-2xl border border-gray-800">
                     <h3 className="text-lg font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">출력</h3>
-                    <div className="prose prose-invert" dangerouslySetInnerHTML={{ __html: problemData.output_desc }} />
+                    <div className="problem-content prose prose-invert" dangerouslySetInnerHTML={{ __html: renderProblemHtml(problemData.output_desc) }} />
                   </div>
                 </div>
                 {/* 제한 입출력 */}
@@ -1028,8 +1139,8 @@ function App() {
                       <Brain className="w-4 h-4" /> 제약 조건
                     </h3>
                     <div 
-                      className="prose prose-invert prose-xs text-gray-400" 
-                      dangerouslySetInnerHTML={{ __html: problemData.problem_limit }} 
+                      className="problem-content prose prose-invert prose-xs text-gray-400" 
+                      dangerouslySetInnerHTML={{ __html: renderProblemHtml(problemData.problem_limit) }} 
                     />
                   </div>
                 )}

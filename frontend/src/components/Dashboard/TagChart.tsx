@@ -12,6 +12,16 @@ const formatRating = (value?: number) =>
 
 const getDisplayTag = (tagName: string) => `#${tagName}`;
 
+const getRatingTone = (rating: number) => {
+  if (rating >= 2000) return { label: 'R', text: 'text-[#ff4a91]', badge: 'bg-[#ff0062]/80' };
+  if (rating >= 1600) return { label: 'D', text: 'text-[#00b4fc]', badge: 'bg-[#00b4fc]/80' };
+  if (rating >= 1200) return { label: 'P', text: 'text-[#27e2a4]', badge: 'bg-[#27e2a4]/75' };
+  if (rating >= 800) return { label: 'G', text: 'text-[#f0a500]', badge: 'bg-[#ec9a00]/80' };
+  if (rating >= 400) return { label: 'S', text: 'text-[#7da4c8]', badge: 'bg-[#55799b]/85' };
+  if (rating > 0) return { label: 'B', text: 'text-[#c46b13]', badge: 'bg-[#ad5600]/85' };
+  return { label: 'N', text: 'text-gray-400', badge: 'bg-gray-500/70' };
+};
+
 export function TagChart({ data, totalSolved }: TagChartProps) {
   const tagRatings = data || [];
   const hasData = tagRatings.some((item) => item.rating > 0);
@@ -29,7 +39,7 @@ export function TagChart({ data, totalSolved }: TagChartProps) {
       </div>
 
       {hasData ? (
-        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(320px,0.9fr)_minmax(520px,1.1fr)]">
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(300px,0.9fr)_minmax(0,1.1fr)]">
           <div className="h-[420px] min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <RadarChart data={chartData} outerRadius="74%">
@@ -54,9 +64,8 @@ export function TagChart({ data, totalSolved }: TagChartProps) {
             </ResponsiveContainer>
           </div>
 
-          <div className="min-w-0 overflow-x-auto custom-scrollbar">
-            <div className="min-w-[620px]">
-            <div className="grid grid-cols-[minmax(150px,1fr)_76px_104px_104px_104px] border-b border-white/10 px-3 pb-3 text-xs font-semibold text-gray-300">
+          <div className="min-w-0 overflow-hidden">
+            <div className="grid grid-cols-[minmax(112px,1fr)_52px_72px_64px_78px] gap-2 border-b border-white/10 px-2 pb-3 text-[11px] font-semibold text-gray-300 sm:grid-cols-[minmax(140px,1fr)_64px_86px_76px_92px]">
               <div>태그</div>
               <div className="text-right">문제</div>
               <div className="text-right">Top 50</div>
@@ -64,23 +73,25 @@ export function TagChart({ data, totalSolved }: TagChartProps) {
               <div className="text-right">레이팅</div>
             </div>
             <div className="max-h-[420px] overflow-y-auto custom-scrollbar">
-              {tagRatings.map((item) => (
-                <div key={item.tag} className="grid grid-cols-[minmax(150px,1fr)_76px_104px_104px_104px] border-b border-white/10 px-3 py-3 text-sm">
-                  <div className="truncate pr-3 text-gray-100">{getDisplayTag(item.tag)}</div>
+              {tagRatings.map((item) => {
+                const ratingTone = getRatingTone(item.rating);
+                return (
+                <div key={item.tag} className="grid grid-cols-[minmax(112px,1fr)_52px_72px_64px_78px] gap-2 border-b border-white/10 px-2 py-3 text-xs sm:grid-cols-[minmax(140px,1fr)_64px_86px_76px_92px] sm:text-sm">
+                  <div className="truncate pr-2 font-semibold text-gray-100">{getDisplayTag(item.tag)}</div>
                   <div className="text-right">
                     <span className="font-semibold text-gray-100">{item.solvedCount.toLocaleString()}</span>
                   </div>
                   <div className="text-right font-semibold text-gray-300">{formatRating(item.topProblemScore)}</div>
                   <div className="text-right font-semibold text-gray-300">{formatRating(item.solvedCountBonus)}</div>
-                  <div className="flex items-center justify-end gap-2 font-bold text-[#55799b]">
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-[#55799b]/80 px-1 text-[11px] text-white">
-                      L
+                  <div className={`flex items-center justify-end gap-1.5 font-bold ${ratingTone.text}`}>
+                    <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded px-1 text-[11px] text-white ${ratingTone.badge}`}>
+                      {ratingTone.label}
                     </span>
                     {formatRating(item.rating)}
                   </div>
                 </div>
-              ))}
-            </div>
+                );
+              })}
             </div>
             <p className="mt-4 text-xs leading-relaxed text-gray-500">
               레이팅은 태그 내 상위 50문제 level 합 * 2와 해결 수 보너스를 더한 Local Tag Rating입니다.
